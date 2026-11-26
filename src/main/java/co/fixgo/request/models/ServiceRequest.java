@@ -11,51 +11,44 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.util.UUID;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 /**
- * Solicitud de un cliente para un subservicio (ServiceRequest en el glosario del SRS v3.0).
- * clientId, serviceTypeId y providerId son llaves foráneas lógicas hacia otros servicios (BD-03).
+ * Solicitud de un cliente para un subservicio (ServiceRequest en el glosario del SRS v3.1).
+ * clientId, serviceTypeId, zoneId y providerId son llaves foráneas lógicas hacia otros servicios (BD-03).
  */
 @Entity
 @Table(name = "service_requests")
 public class ServiceRequest {
 
-    // BD-02: UUID generado por la aplicación y guardado como CHAR(36)
+    // BD-02: llave numérica BIGINT AUTO_INCREMENT
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "id", columnDefinition = "CHAR(36)", nullable = false, updatable = false)
-    private UUID id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id", nullable = false, updatable = false)
+    private Long id;
 
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "client_id", columnDefinition = "CHAR(36)", nullable = false, updatable = false)
-    private UUID clientId;
+    @Column(name = "client_id", nullable = false, updatable = false)
+    private Long clientId;
 
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "service_type_id", columnDefinition = "CHAR(36)", nullable = false)
-    private UUID serviceTypeId;
+    @Column(name = "service_type_id", nullable = false)
+    private Long serviceTypeId;
 
-    @JdbcTypeCode(SqlTypes.CHAR)
-    @Column(name = "provider_id", columnDefinition = "CHAR(36)")
-    private UUID providerId;
+    @Column(name = "zone_id")
+    private Long zoneId;
 
-    // Se guarda como texto (VARCHAR), no como ENUM nativo de MySQL
+    @Column(name = "provider_id")
+    private Long providerId;
+
     @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(name = "mode", length = 20, nullable = false, updatable = false)
+    @Column(name = "mode", nullable = false, updatable = false)
     private RequestMode mode;
 
     @Enumerated(EnumType.STRING)
-    @JdbcTypeCode(SqlTypes.VARCHAR)
-    @Column(name = "status", length = 20, nullable = false)
+    @Column(name = "status", nullable = false)
     private RequestStatus status;
 
-    @Column(name = "description", length = 1000, nullable = false)
+    @Column(name = "description", columnDefinition = "TEXT", nullable = false)
     private String description;
 
     @Column(name = "address", length = 255)
@@ -77,63 +70,75 @@ public class ServiceRequest {
     @Column(name = "vehicle_type", length = 30)
     private String vehicleType;
 
-    @Column(name = "cancellation_reason", length = 500)
+    // RN-09: en urgente es el precio de referencia al crear; en programada, el de la cotización aceptada
+    @Column(name = "agreed_value", precision = 10, scale = 2)
+    private BigDecimal agreedValue;
+
+    @Column(name = "cancellation_reason", columnDefinition = "TEXT")
     private String cancellationReason;
 
     @Column(name = "cancelled_at")
-    private LocalDateTime cancelledAt;
+    private Instant cancelledAt;
 
     // BD-02: fechas en UTC
     @Column(name = "created_at", nullable = false, updatable = false)
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 
     @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updatedAt;
+    private Instant updatedAt;
 
     public ServiceRequest() {
     }
 
     @PrePersist
     void onCreate() {
-        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         this.createdAt = now;
         this.updatedAt = now;
     }
 
     @PreUpdate
     void onUpdate() {
-        this.updatedAt = LocalDateTime.now(ZoneOffset.UTC);
+        this.updatedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS);
     }
 
-    public UUID getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(UUID id) {
+    public void setId(Long id) {
         this.id = id;
     }
 
-    public UUID getClientId() {
+    public Long getClientId() {
         return clientId;
     }
 
-    public void setClientId(UUID clientId) {
+    public void setClientId(Long clientId) {
         this.clientId = clientId;
     }
 
-    public UUID getServiceTypeId() {
+    public Long getServiceTypeId() {
         return serviceTypeId;
     }
 
-    public void setServiceTypeId(UUID serviceTypeId) {
+    public void setServiceTypeId(Long serviceTypeId) {
         this.serviceTypeId = serviceTypeId;
     }
 
-    public UUID getProviderId() {
+    public Long getZoneId() {
+        return zoneId;
+    }
+
+    public void setZoneId(Long zoneId) {
+        this.zoneId = zoneId;
+    }
+
+    public Long getProviderId() {
         return providerId;
     }
 
-    public void setProviderId(UUID providerId) {
+    public void setProviderId(Long providerId) {
         this.providerId = providerId;
     }
 
@@ -209,6 +214,14 @@ public class ServiceRequest {
         this.vehicleType = vehicleType;
     }
 
+    public BigDecimal getAgreedValue() {
+        return agreedValue;
+    }
+
+    public void setAgreedValue(BigDecimal agreedValue) {
+        this.agreedValue = agreedValue;
+    }
+
     public String getCancellationReason() {
         return cancellationReason;
     }
@@ -217,27 +230,27 @@ public class ServiceRequest {
         this.cancellationReason = cancellationReason;
     }
 
-    public LocalDateTime getCancelledAt() {
+    public Instant getCancelledAt() {
         return cancelledAt;
     }
 
-    public void setCancelledAt(LocalDateTime cancelledAt) {
+    public void setCancelledAt(Instant cancelledAt) {
         this.cancelledAt = cancelledAt;
     }
 
-    public LocalDateTime getCreatedAt() {
+    public Instant getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(LocalDateTime createdAt) {
+    public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
     }
 
-    public LocalDateTime getUpdatedAt() {
+    public Instant getUpdatedAt() {
         return updatedAt;
     }
 
-    public void setUpdatedAt(LocalDateTime updatedAt) {
+    public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
     }
 }

@@ -4,9 +4,6 @@ import co.fixgo.request.dto.CreateRequestDTO;
 import co.fixgo.request.dto.RequestResponseDTO;
 import co.fixgo.request.dto.UpdateRequestDTO;
 import co.fixgo.request.models.ServiceRequest;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.Locale;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +18,7 @@ public class RequestMapper {
         ServiceRequest request = new ServiceRequest();
         request.setClientId(dto.getClientId());
         request.setServiceTypeId(dto.getServiceTypeId());
+        request.setZoneId(dto.getZoneId());
         request.setMode(dto.getMode());
         request.setDescription(clean(dto.getDescription()));
         request.setAddress(clean(dto.getAddress()));
@@ -34,6 +32,7 @@ public class RequestMapper {
 
     /** Copia los campos editables (RF3.3) sobre la entidad existente, sin cambiar su identificador. */
     public void applyUpdate(ServiceRequest request, UpdateRequestDTO dto) {
+        request.setZoneId(dto.getZoneId());
         request.setDescription(clean(dto.getDescription()));
         request.setAddress(clean(dto.getAddress()));
         request.setLatitude(dto.getLatitude());
@@ -49,6 +48,8 @@ public class RequestMapper {
         dto.setClientId(request.getClientId());
         dto.setServiceTypeId(request.getServiceTypeId());
         dto.setProviderId(request.getProviderId());
+        dto.setZoneId(request.getZoneId());
+        dto.setAgreedValue(request.getAgreedValue());
         dto.setMode(request.getMode());
         dto.setStatus(request.getStatus());
         dto.setDescription(request.getDescription());
@@ -59,9 +60,9 @@ public class RequestMapper {
         dto.setVehicleBrand(request.getVehicleBrand());
         dto.setVehicleType(request.getVehicleType());
         dto.setCancellationReason(request.getCancellationReason());
-        dto.setCancelledAt(toInstant(request.getCancelledAt()));
-        dto.setCreatedAt(toInstant(request.getCreatedAt()));
-        dto.setUpdatedAt(toInstant(request.getUpdatedAt()));
+        dto.setCancelledAt(request.getCancelledAt());
+        dto.setCreatedAt(request.getCreatedAt());
+        dto.setUpdatedAt(request.getUpdatedAt());
         return dto;
     }
 
@@ -78,10 +79,5 @@ public class RequestMapper {
     private String plate(String value) {
         String cleaned = clean(value);
         return cleaned == null ? null : cleaned.toUpperCase(Locale.ROOT);
-    }
-
-    /** Las fechas se guardan en UTC; en la API viajan como Instant (ISO 8601 con Z). */
-    private Instant toInstant(LocalDateTime value) {
-        return value == null ? null : value.toInstant(ZoneOffset.UTC);
     }
 }

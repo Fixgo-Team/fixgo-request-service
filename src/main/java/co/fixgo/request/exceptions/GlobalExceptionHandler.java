@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -23,7 +24,6 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 /**
  * Escudo global de errores: convierte cada excepción en un {@link ApiResponse} con success = false
  * y un código HTTP que coincide con el error. Los controladores no usan try-catch.
- * Los códigos 401 y 403 los agrega la configuración de seguridad.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -87,6 +87,15 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessRuleException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessRule(BusinessRuleException ex) {
         return build(HttpStatus.CONFLICT, ex.getCode(), ex.getMessage(), null);
+    }
+
+    /** 409: la base de datos rechazó la operación por una restricción (BD-05), por ejemplo una carrera entre dos peticiones. */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException ex,
+                                                                 HttpServletRequest request) {
+        log.warn("Restricción de base de datos violada en {} {}", request.getMethod(), request.getRequestURI(), ex);
+        return build(HttpStatus.CONFLICT, "DATA_INTEGRITY_VIOLATION",
+                "La operación entra en conflicto con los datos existentes.", null);
     }
 
     /** 500: error no previsto. El detalle queda solo en el log; nunca se envía el stack trace al cliente. */

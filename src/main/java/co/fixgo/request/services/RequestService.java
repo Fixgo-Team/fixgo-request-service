@@ -6,10 +6,9 @@ import co.fixgo.request.dto.RequestResponseDTO;
 import co.fixgo.request.dto.UpdateRequestDTO;
 import co.fixgo.request.models.RequestStatus;
 import java.util.List;
-import java.util.UUID;
 
 /**
- * Operaciones de negocio sobre las solicitudes (módulo 3 del SRS v3.0).
+ * Operaciones de negocio sobre las solicitudes (módulo 3 del SRS v3.1).
  */
 public interface RequestService {
 
@@ -17,14 +16,14 @@ public interface RequestService {
     RequestResponseDTO create(CreateRequestDTO dto);
 
     /** RF4.1: lista solicitudes, con filtros opcionales por cliente y estado. */
-    List<RequestResponseDTO> findAll(UUID clientId, RequestStatus status);
+    List<RequestResponseDTO> findAll(Long clientId, RequestStatus status);
 
     /** RF4.6: detalle de una solicitud. */
-    RequestResponseDTO findById(UUID id);
+    RequestResponseDTO findById(Long id);
 
     /** RF3.3: modifica una solicitud antes de que sea aceptada. */
-    RequestResponseDTO update(UUID id, UpdateRequestDTO dto);
+    RequestResponseDTO update(Long id, UpdateRequestDTO dto);
 
     /** RF3.4 y RN-08: cancela con motivo; nunca se borra físicamente. */
-    RequestResponseDTO cancel(UUID id, CancelRequestDTO dto);
+    RequestResponseDTO cancel(Long id, CancelRequestDTO dto);
 }

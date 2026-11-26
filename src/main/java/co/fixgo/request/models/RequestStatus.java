@@ -1,7 +1,7 @@
 package co.fixgo.request.models;
 
 /**
- * Estados de una solicitud (Anexo A.3 del SRS v3.0).
+ * Estados de una solicitud (Anexo A.4 del SRS v3.1).
  */
 public enum RequestStatus {
 

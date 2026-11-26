@@ -4,7 +4,7 @@ import co.fixgo.request.models.ServiceRequest;
 
 /**
  * Lo que este servicio le pide a fixgo-notification-service (RF5.1).
- * Un fallo al notificar no debe perder la solicitud (RNF-08): las implementaciones no lanzan excepciones.
+ * Un fallo al notificar no debe perder la solicitud (RNF-12): las implementaciones no lanzan excepciones.
  */
 public interface NotificationClient {
 

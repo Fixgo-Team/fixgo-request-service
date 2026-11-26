@@ -53,13 +53,13 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Monitoreo: salud y métricas (RNF-24) -->
+        <!-- Monitoreo: salud y métricas (RNF-28) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
-        <!-- Contrato OpenAPI 3 y Swagger UI (RNF-16) -->
+        <!-- Contrato OpenAPI 3 y Swagger UI (RNF-24) -->
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

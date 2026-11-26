@@ -24,9 +24,12 @@ import co.fixgo.request.models.RequestStatus;
 import co.fixgo.request.models.ServiceRequest;
 import co.fixgo.request.repositories.ServiceRequestRepository;
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -35,7 +38,10 @@ import org.junit.jupiter.api.Test;
  */
 class RequestServiceImplTest {
 
-    private final UUID serviceTypeId = UUID.randomUUID();
+    private static final Instant NOW = Instant.parse("2026-11-12T01:30:00Z");
+
+    private final Long serviceTypeId = 7L;
+    private final AtomicLong ids = new AtomicLong(100);
 
     private ServiceRequestRepository repository;
     private CatalogClient catalogClient;
@@ -47,14 +53,14 @@ class RequestServiceImplTest {
         repository = mock(ServiceRequestRepository.class);
         catalogClient = mock(CatalogClient.class);
         notificationClient = mock(NotificationClient.class);
-        service = new RequestServiceImpl(repository, new RequestMapper(), catalogClient, notificationClient);
+        service = new RequestServiceImpl(repository, new RequestMapper(), catalogClient, notificationClient,
+                Clock.fixed(NOW, ZoneOffset.UTC));
 
-        when(catalogClient.findServiceType(serviceTypeId))
-                .thenReturn(Optional.of(new ServiceTypeInfo(serviceTypeId, true, true)));
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(serviceType(true, true)));
         when(repository.save(any(ServiceRequest.class))).thenAnswer(invocation -> {
             ServiceRequest saved = invocation.getArgument(0);
             if (saved.getId() == null) {
-                saved.setId(UUID.randomUUID());
+                saved.setId(ids.incrementAndGet());
             }
             return saved;
         });
@@ -70,10 +76,19 @@ class RequestServiceImplTest {
     }
 
     @Test
-    void scheduledRequestStartsOpen() {
+    void urgentRequestStoresReferencePriceAsAgreedValue() {
+        RequestResponseDTO result = service.create(urgentDto());
+
+        assertThat(result.getAgreedValue()).isEqualByComparingTo("85000.00");
+    }
+
+    @Test
+    void scheduledRequestStartsOpenWithoutAgreedValue() {
         RequestResponseDTO result = service.create(scheduledDto());
 
         assertThat(result.getStatus()).isEqualTo(RequestStatus.OPEN);
+        assertThat(result.getZoneId()).isEqualTo(3L);
+        assertThat(result.getAgreedValue()).isNull();
     }
 
     @Test
@@ -97,13 +112,48 @@ class RequestServiceImplTest {
     }
 
     @Test
+    void scheduledRequestWithoutZoneIsRejected() {
+        CreateRequestDTO dto = scheduledDto();
+        dto.setZoneId(null);
+
+        assertThatThrownBy(() -> service.create(dto))
+                .isInstanceOfSatisfying(InvalidRequestDataException.class,
+                        ex -> assertThat(ex.getDetails()).containsKey("zoneId"));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void urgentRequestDoesNotNeedZone() {
+        CreateRequestDTO dto = urgentDto();
+        dto.setZoneId(null);
+
+        assertThat(service.create(dto).getStatus()).isEqualTo(RequestStatus.PENDING);
+    }
+
+    @Test
     void urgentModeIsRejectedWhenServiceTypeDoesNotAllowIt() {
-        when(catalogClient.findServiceType(serviceTypeId))
-                .thenReturn(Optional.of(new ServiceTypeInfo(serviceTypeId, true, false)));
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(serviceType(true, false)));
 
         assertThatThrownBy(() -> service.create(urgentDto()))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("URGENT_MODE_NOT_ALLOWED");
+    }
+
+    @Test
+    void inactiveServiceTypeIsRejected() {
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(serviceType(false, true)));
+
+        assertThatThrownBy(() -> service.create(urgentDto()))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("SERVICE_TYPE_INACTIVE");
+    }
+
+    @Test
+    void unknownServiceTypeIsRejected() {
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.create(urgentDto()))
+                .isInstanceOf(InvalidRequestDataException.class);
     }
 
     @Test
@@ -117,26 +167,6 @@ class RequestServiceImplTest {
         assertThatThrownBy(() -> service.update(existing.getId(), dto))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("REQUEST_NOT_EDITABLE");
-    }
-
-    @Test
-    void openRequestIsCancelledWithReason() {
-        ServiceRequest existing = existing(RequestStatus.OPEN);
-
-        RequestResponseDTO result = service.cancel(existing.getId(), new CancelRequestDTO("Ya lo solucioné"));
-
-        assertThat(result.getStatus()).isEqualTo(RequestStatus.CANCELLED);
-        assertThat(result.getCancellationReason()).isEqualTo("Ya lo solucioné");
-        assertThat(result.getCancelledAt()).isNotNull();
-    }
-
-    @Test
-    void inProgressRequestCannotBeCancelled() {
-        ServiceRequest existing = existing(RequestStatus.IN_PROGRESS);
-
-        assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes")))
-                .isInstanceOf(BusinessRuleException.class)
-                .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
     }
 
     @Test
@@ -166,6 +196,27 @@ class RequestServiceImplTest {
     }
 
     @Test
+    void openRequestIsCancelledWithReason() {
+        ServiceRequest existing = existing(RequestStatus.OPEN);
+
+        RequestResponseDTO result = service.cancel(existing.getId(), new CancelRequestDTO("Ya lo solucioné"));
+
+        assertThat(result.getStatus()).isEqualTo(RequestStatus.CANCELLED);
+        assertThat(result.getCancellationReason()).isEqualTo("Ya lo solucioné");
+        assertThat(result.getCancelledAt()).isEqualTo(NOW);
+        verify(notificationClient).notifyStatusChanged(existing);
+    }
+
+    @Test
+    void inProgressRequestCannotBeCancelled() {
+        ServiceRequest existing = existing(RequestStatus.IN_PROGRESS);
+
+        assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes")))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
+    }
+
+    @Test
     void findByIdReturnsTheRequest() {
         ServiceRequest existing = existing(RequestStatus.PENDING);
 
@@ -174,7 +225,7 @@ class RequestServiceImplTest {
 
     @Test
     void findAllFiltersByClientAndStatus() {
-        UUID clientId = UUID.randomUUID();
+        Long clientId = 55L;
         ServiceRequest open = existing(RequestStatus.OPEN);
         ServiceRequest pending = existing(RequestStatus.PENDING);
         when(repository.findByClientIdAndStatusOrderByCreatedAtDesc(clientId, RequestStatus.OPEN))
@@ -192,37 +243,24 @@ class RequestServiceImplTest {
     }
 
     @Test
-    void inactiveServiceTypeIsRejected() {
-        when(catalogClient.findServiceType(serviceTypeId))
-                .thenReturn(Optional.of(new ServiceTypeInfo(serviceTypeId, false, true)));
-
-        assertThatThrownBy(() -> service.create(urgentDto()))
-                .isInstanceOf(BusinessRuleException.class)
-                .extracting("code").isEqualTo("SERVICE_TYPE_INACTIVE");
-    }
-
-    @Test
-    void unknownServiceTypeIsRejected() {
-        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.empty());
-
-        assertThatThrownBy(() -> service.create(urgentDto()))
-                .isInstanceOf(InvalidRequestDataException.class);
-    }
-
-    @Test
     void unknownRequestReturnsNotFound() {
-        UUID id = UUID.randomUUID();
+        Long id = 999L;
         when(repository.findById(id)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.findById(id))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
+    private ServiceTypeInfo serviceType(boolean active, boolean urgentAllowed) {
+        return new ServiceTypeInfo(serviceTypeId, active, urgentAllowed, new BigDecimal("85000.00"), false, false);
+    }
+
     private CreateRequestDTO urgentDto() {
         CreateRequestDTO dto = new CreateRequestDTO();
-        dto.setClientId(UUID.randomUUID());
+        dto.setClientId(55L);
         dto.setServiceTypeId(serviceTypeId);
         dto.setMode(RequestMode.URGENT);
+        dto.setZoneId(3L);
         dto.setDescription("El carro no enciende");
         dto.setLatitude(new BigDecimal("2.927300"));
         dto.setLongitude(new BigDecimal("-75.281900"));
@@ -232,9 +270,10 @@ class RequestServiceImplTest {
 
     private CreateRequestDTO scheduledDto() {
         CreateRequestDTO dto = new CreateRequestDTO();
-        dto.setClientId(UUID.randomUUID());
+        dto.setClientId(55L);
         dto.setServiceTypeId(serviceTypeId);
         dto.setMode(RequestMode.SCHEDULED);
+        dto.setZoneId(3L);
         dto.setDescription("Revisar la nevera, no enfría");
         dto.setAddress("Calle 10 # 5-20, Neiva");
         return dto;
@@ -242,8 +281,8 @@ class RequestServiceImplTest {
 
     private ServiceRequest existing(RequestStatus status) {
         ServiceRequest request = new ServiceRequest();
-        request.setId(UUID.randomUUID());
-        request.setClientId(UUID.randomUUID());
+        request.setId(ids.incrementAndGet());
+        request.setClientId(55L);
         request.setServiceTypeId(serviceTypeId);
         request.setMode(RequestMode.URGENT);
         request.setStatus(status);

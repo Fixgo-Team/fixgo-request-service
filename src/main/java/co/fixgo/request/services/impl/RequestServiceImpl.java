@@ -17,15 +17,14 @@ import co.fixgo.request.models.ServiceRequest;
 import co.fixgo.request.repositories.ServiceRequestRepository;
 import co.fixgo.request.services.RequestService;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Reglas de negocio de las solicitudes. Las dependencias llegan por constructor (RNF-25),
+ * Reglas de negocio de las solicitudes. Las dependencias llegan por constructor (RNF-30),
  * y el catálogo y las notificaciones se usan a través de interfaces (principio D de SOLID).
  */
 @Service
@@ -35,15 +34,18 @@ public class RequestServiceImpl implements RequestService {
     private final RequestMapper requestMapper;
     private final CatalogClient catalogClient;
     private final NotificationClient notificationClient;
+    private final Clock clock;
 
     public RequestServiceImpl(ServiceRequestRepository serviceRequestRepository,
                               RequestMapper requestMapper,
                               CatalogClient catalogClient,
-                              NotificationClient notificationClient) {
+                              NotificationClient notificationClient,
+                              Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.requestMapper = requestMapper;
         this.catalogClient = catalogClient;
         this.notificationClient = notificationClient;
+        this.clock = clock;
     }
 
     @Override
@@ -59,11 +61,15 @@ public class RequestServiceImpl implements RequestService {
         if (dto.getMode() == RequestMode.URGENT && !serviceType.urgentAllowed()) {
             throw new BusinessRuleException("URGENT_MODE_NOT_ALLOWED", "Este subservicio no admite el modo urgente.");
         }
-        validateLocation(dto.getMode(), dto.getAddress(), dto.getLatitude(), dto.getLongitude());
+        validateLocation(dto.getMode(), dto.getAddress(), dto.getLatitude(), dto.getLongitude(), dto.getZoneId());
 
         ServiceRequest request = requestMapper.toEntity(dto);
-        // Anexo A.3: una urgencia empieza en PENDING y una programada en OPEN
+        // Anexo A.4: una urgencia empieza en PENDING y una programada en OPEN
         request.setStatus(dto.getMode() == RequestMode.URGENT ? RequestStatus.PENDING : RequestStatus.OPEN);
+        // RN-09: en una urgencia el valor acordado es el precio de referencia vigente al crear
+        if (dto.getMode() == RequestMode.URGENT) {
+            request.setAgreedValue(serviceType.referencePrice());
+        }
 
         ServiceRequest saved = serviceRequestRepository.save(request);
         notificationClient.notifyRequestCreated(saved);
@@ -72,7 +78,7 @@ public class RequestServiceImpl implements RequestService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<RequestResponseDTO> findAll(UUID clientId, RequestStatus status) {
+    public List<RequestResponseDTO> findAll(Long clientId, RequestStatus status) {
         List<ServiceRequest> requests;
         if (clientId != null && status != null) {
             requests = serviceRequestRepository.findByClientIdAndStatusOrderByCreatedAtDesc(clientId, status);
@@ -88,13 +94,13 @@ public class RequestServiceImpl implements RequestService {
 
     @Override
     @Transactional(readOnly = true)
-    public RequestResponseDTO findById(UUID id) {
+    public RequestResponseDTO findById(Long id) {
         return requestMapper.toResponse(getOrThrow(id));
     }
 
     @Override
     @Transactional
-    public RequestResponseDTO update(UUID id, UpdateRequestDTO dto) {
+    public RequestResponseDTO update(Long id, UpdateRequestDTO dto) {
         ServiceRequest request = getOrThrow(id);
 
         // RF3.3: solo antes de que sea aceptada
@@ -102,7 +108,7 @@ public class RequestServiceImpl implements RequestService {
             throw new BusinessRuleException("REQUEST_NOT_EDITABLE",
                     "La solicitud ya no se puede modificar porque está en estado " + request.getStatus() + ".");
         }
-        validateLocation(request.getMode(), dto.getAddress(), dto.getLatitude(), dto.getLongitude());
+        validateLocation(request.getMode(), dto.getAddress(), dto.getLatitude(), dto.getLongitude(), dto.getZoneId());
 
         requestMapper.applyUpdate(request, dto);
         return requestMapper.toResponse(serviceRequestRepository.save(request));
@@ -110,7 +116,7 @@ public class RequestServiceImpl implements RequestService {
 
     @Override
     @Transactional
-    public RequestResponseDTO cancel(UUID id, CancelRequestDTO dto) {
+    public RequestResponseDTO cancel(Long id, CancelRequestDTO dto) {
         ServiceRequest request = getOrThrow(id);
 
         // RF3.4: solo antes de que el servicio esté en curso
@@ -121,24 +127,25 @@ public class RequestServiceImpl implements RequestService {
 
         request.setStatus(RequestStatus.CANCELLED);
         request.setCancellationReason(dto.getReason().trim());
-        request.setCancelledAt(LocalDateTime.now(ZoneOffset.UTC));
+        request.setCancelledAt(Instant.now(clock));
 
         ServiceRequest saved = serviceRequestRepository.save(request);
         notificationClient.notifyStatusChanged(saved);
         return requestMapper.toResponse(saved);
     }
 
-    private ServiceRequest getOrThrow(UUID id) {
+    private ServiceRequest getOrThrow(Long id) {
         return serviceRequestRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("La solicitud " + id + " no existe."));
     }
 
     /**
      * RF3.1: una urgencia necesita ubicación puntual (latitud y longitud).
-     * RF3.2: una programada necesita dirección.
+     * RF3.2: una programada necesita dirección y zona.
      * En cualquier modo, latitud y longitud van juntas.
      */
-    private void validateLocation(RequestMode mode, String address, BigDecimal latitude, BigDecimal longitude) {
+    private void validateLocation(RequestMode mode, String address, BigDecimal latitude, BigDecimal longitude,
+                                  Long zoneId) {
         if ((latitude == null) != (longitude == null)) {
             throw new InvalidRequestDataException(latitude == null ? "latitude" : "longitude",
                     "La latitud y la longitud deben enviarse juntas.");
@@ -149,6 +156,9 @@ public class RequestServiceImpl implements RequestService {
         }
         if (mode == RequestMode.SCHEDULED && (address == null || address.isBlank())) {
             throw new InvalidRequestDataException("address", "Una solicitud programada necesita la dirección.");
+        }
+        if (mode == RequestMode.SCHEDULED && zoneId == null) {
+            throw new InvalidRequestDataException("zoneId", "Una solicitud programada necesita la zona.");
         }
     }
 }

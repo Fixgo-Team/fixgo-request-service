@@ -8,7 +8,6 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
-import java.util.UUID;
 
 /**
  * Datos para crear una solicitud urgente (RF3.1) o programada (RF3.2).
@@ -16,15 +15,18 @@ import java.util.UUID;
  */
 public class CreateRequestDTO {
 
-    // Temporal: cuando esté la seguridad (paso 3) se toma del token y deja de venir en el JSON
+    // Temporal: con la seguridad (fase 2) se toma del token y deja de venir en el JSON
     @NotNull(message = "El cliente es obligatorio.")
-    private UUID clientId;
+    private Long clientId;
 
     @NotNull(message = "El subservicio es obligatorio.")
-    private UUID serviceTypeId;
+    private Long serviceTypeId;
 
     @NotNull(message = "El modo es obligatorio: URGENT o SCHEDULED.")
     private RequestMode mode;
+
+    // RF3.2: obligatoria en programada; en urgente la resuelve dispatch a partir del punto (RNF-12)
+    private Long zoneId;
 
     @NotBlank(message = "La descripción es obligatoria.")
     @Size(max = 1000, message = "La descripción admite máximo 1000 caracteres.")
@@ -55,19 +57,19 @@ public class CreateRequestDTO {
     public CreateRequestDTO() {
     }
 
-    public UUID getClientId() {
+    public Long getClientId() {
         return clientId;
     }
 
-    public void setClientId(UUID clientId) {
+    public void setClientId(Long clientId) {
         this.clientId = clientId;
     }
 
-    public UUID getServiceTypeId() {
+    public Long getServiceTypeId() {
         return serviceTypeId;
     }
 
-    public void setServiceTypeId(UUID serviceTypeId) {
+    public void setServiceTypeId(Long serviceTypeId) {
         this.serviceTypeId = serviceTypeId;
     }
 
@@ -77,6 +79,14 @@ public class CreateRequestDTO {
 
     public void setMode(RequestMode mode) {
         this.mode = mode;
+    }
+
+    public Long getZoneId() {
+        return zoneId;
+    }
+
+    public void setZoneId(Long zoneId) {
+        this.zoneId = zoneId;
     }
 
     public String getDescription() {

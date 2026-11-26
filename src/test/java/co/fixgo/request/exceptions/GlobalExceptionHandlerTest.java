@@ -13,6 +13,7 @@ import jakarta.validation.constraints.Positive;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -86,6 +87,14 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void returns409WhenTheDatabaseRejectsTheOperation() throws Exception {
+        mockMvc.perform(get("/test/integrity"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("DATA_INTEGRITY_VIOLATION"));
+    }
+
+    @Test
     void returns500WithoutInternalDetails() throws Exception {
         mockMvc.perform(get("/test/unexpected"))
                 .andExpect(status().isInternalServerError())
@@ -134,6 +143,11 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/conflict")
         ResponseEntity<ApiResponse<Void>> conflict() {
             throw new BusinessRuleException("QUOTE_ALREADY_ACCEPTED", "La solicitud ya tiene una cotización aceptada.");
+        }
+
+        @GetMapping("/test/integrity")
+        ResponseEntity<ApiResponse<Void>> integrity() {
+            throw new DataIntegrityViolationException("uk_q_one_accepted");
         }
 
         @GetMapping("/test/unexpected")

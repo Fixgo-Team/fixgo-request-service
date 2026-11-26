@@ -5,7 +5,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
  * Punto de entrada del microservicio de solicitudes de FixGo.
- * Cubre el módulo 3 del SRS v3.0 (solicitudes urgentes y programadas, cotizaciones) y los mensajes (RF5.4).
+ * Cubre el módulo 3 del SRS v3.1 (solicitudes urgentes y programadas, cotizaciones) y los mensajes (RF5.4).
  */
 @SpringBootApplication
 public class RequestServiceApplication {

@@ -4,17 +4,18 @@ import co.fixgo.request.models.RequestMode;
 import co.fixgo.request.models.RequestStatus;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.UUID;
 
 /**
  * Solicitud tal como la reciben Web y Móvil. Las fechas viajan en ISO 8601 y UTC.
  */
 public class RequestResponseDTO {
 
-    private UUID id;
-    private UUID clientId;
-    private UUID serviceTypeId;
-    private UUID providerId;
+    private Long id;
+    private Long clientId;
+    private Long serviceTypeId;
+    private Long providerId;
+    private Long zoneId;
+    private BigDecimal agreedValue;
     private RequestMode mode;
     private RequestStatus status;
     private String description;
@@ -32,36 +33,52 @@ public class RequestResponseDTO {
     public RequestResponseDTO() {
     }
 
-    public UUID getId() {
+    public Long getId() {
         return id;
     }
 
-    public void setId(UUID id) {
+    public void setId(Long id) {
         this.id = id;
     }
 
-    public UUID getClientId() {
+    public Long getClientId() {
         return clientId;
     }
 
-    public void setClientId(UUID clientId) {
+    public void setClientId(Long clientId) {
         this.clientId = clientId;
     }
 
-    public UUID getServiceTypeId() {
+    public Long getServiceTypeId() {
         return serviceTypeId;
     }
 
-    public void setServiceTypeId(UUID serviceTypeId) {
+    public void setServiceTypeId(Long serviceTypeId) {
         this.serviceTypeId = serviceTypeId;
     }
 
-    public UUID getProviderId() {
+    public Long getProviderId() {
         return providerId;
     }
 
-    public void setProviderId(UUID providerId) {
+    public void setProviderId(Long providerId) {
         this.providerId = providerId;
+    }
+
+    public Long getZoneId() {
+        return zoneId;
+    }
+
+    public void setZoneId(Long zoneId) {
+        this.zoneId = zoneId;
+    }
+
+    public BigDecimal getAgreedValue() {
+        return agreedValue;
+    }
+
+    public void setAgreedValue(BigDecimal agreedValue) {
+        this.agreedValue = agreedValue;
     }
 
     public RequestMode getMode() {

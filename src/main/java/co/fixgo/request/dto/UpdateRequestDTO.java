@@ -17,6 +17,8 @@ public class UpdateRequestDTO {
     @Size(max = 1000, message = "La descripción admite máximo 1000 caracteres.")
     private String description;
 
+    private Long zoneId;
+
     @Size(max = 255, message = "La dirección admite máximo 255 caracteres.")
     private String address;
 
@@ -47,6 +49,14 @@ public class UpdateRequestDTO {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Long getZoneId() {
+        return zoneId;
+    }
+
+    public void setZoneId(Long zoneId) {
+        this.zoneId = zoneId;
     }
 
     public String getAddress() {

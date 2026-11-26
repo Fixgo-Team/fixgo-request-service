@@ -1,7 +1,7 @@
 package co.fixgo.request.models;
 
 /**
- * Modo de la solicitud (sección 1.3 del SRS v3.0).
+ * Modo de la solicitud (sección 1.3 del SRS v3.1).
  */
 public enum RequestMode {
 
