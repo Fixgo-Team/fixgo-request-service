@@ -1,22 +1,28 @@
 package co.fixgo.request.services.impl;
 
 import co.fixgo.request.clients.CatalogClient;
+import co.fixgo.request.clients.DispatchClient;
 import co.fixgo.request.clients.NotificationClient;
+import co.fixgo.request.clients.ProviderDirectory;
 import co.fixgo.request.clients.ServiceTypeInfo;
 import co.fixgo.request.dto.CancelRequestDTO;
 import co.fixgo.request.dto.CreateRequestDTO;
+import co.fixgo.request.dto.DateSlotDTO;
 import co.fixgo.request.dto.RequestResponseDTO;
 import co.fixgo.request.dto.UpdateRequestDTO;
 import co.fixgo.request.exceptions.BusinessRuleException;
+import co.fixgo.request.exceptions.DependencyUnavailableException;
 import co.fixgo.request.exceptions.ForbiddenOperationException;
 import co.fixgo.request.exceptions.InvalidRequestDataException;
 import co.fixgo.request.exceptions.ResourceNotFoundException;
 import co.fixgo.request.mappers.RequestMapper;
+import co.fixgo.request.models.RequestDateSlot;
 import co.fixgo.request.models.RequestMode;
 import co.fixgo.request.models.RequestStatus;
 import co.fixgo.request.models.ServiceRequest;
 import co.fixgo.request.policies.RequestPolicy;
 import co.fixgo.request.policies.RequestTransitionPolicy;
+import co.fixgo.request.repositories.RequestDateSlotRepository;
 import co.fixgo.request.repositories.ServiceRequestRepository;
 import co.fixgo.request.security.ActorRole;
 import co.fixgo.request.security.CurrentActor;
@@ -25,6 +31,10 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,25 +45,36 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class RequestServiceImpl implements RequestService {
 
+    private static final Logger log = LoggerFactory.getLogger(RequestServiceImpl.class);
+
     private final ServiceRequestRepository serviceRequestRepository;
+    private final RequestDateSlotRepository slotRepository;
     private final RequestMapper requestMapper;
     private final CatalogClient catalogClient;
     private final NotificationClient notificationClient;
+    private final DispatchClient dispatchClient;
+    private final ProviderDirectory providerDirectory;
     private final RequestTransitionPolicy transitionPolicy;
     private final List<RequestPolicy> policies;
     private final Clock clock;
 
     public RequestServiceImpl(ServiceRequestRepository serviceRequestRepository,
+                              RequestDateSlotRepository slotRepository,
                               RequestMapper requestMapper,
                               CatalogClient catalogClient,
                               NotificationClient notificationClient,
+                              DispatchClient dispatchClient,
+                              ProviderDirectory providerDirectory,
                               RequestTransitionPolicy transitionPolicy,
                               List<RequestPolicy> policies,
                               Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
+        this.slotRepository = slotRepository;
         this.requestMapper = requestMapper;
         this.catalogClient = catalogClient;
         this.notificationClient = notificationClient;
+        this.dispatchClient = dispatchClient;
+        this.providerDirectory = providerDirectory;
         this.transitionPolicy = transitionPolicy;
         this.policies = policies;
         this.clock = clock;
@@ -74,6 +95,9 @@ public class RequestServiceImpl implements RequestService {
             throw new BusinessRuleException("URGENT_MODE_NOT_ALLOWED", "Este subservicio no admite el modo urgente.");
         }
         validateLocation(dto.getMode(), dto.getAddress(), dto.getLatitude(), dto.getLongitude(), dto.getZoneId());
+        if (dto.getMode() == RequestMode.SCHEDULED) {
+            validateSlots(dto.getDateSlots());
+        }
 
         ServiceRequest request = requestMapper.toEntity(dto);
         request.setClientId(actor.userId());
@@ -86,8 +110,16 @@ public class RequestServiceImpl implements RequestService {
         }
 
         ServiceRequest saved = serviceRequestRepository.save(request);
+        List<RequestDateSlot> slots = List.of();
+        if (saved.getMode() == RequestMode.URGENT) {
+            // RNF-12: si dispatch no responde, el error deshace la transacción y no queda una urgencia pendiente
+            dispatchClient.requestMatching(saved);
+        } else {
+            slots = slotRepository.saveAll(requestMapper.toSlots(saved.getId(), dto.getDateSlots()));
+            notifyCandidateProviders(saved);
+        }
         notificationClient.notifyRequestCreated(saved);
-        return requestMapper.toResponse(saved);
+        return requestMapper.toResponse(saved, slots);
     }
 
     @Override
@@ -113,7 +145,7 @@ public class RequestServiceImpl implements RequestService {
             case ADMIN -> findAllForAdmin(clientId, status);
             default -> throw new ForbiddenOperationException("No tienes permiso para consultar solicitudes.");
         };
-        return requests.stream().map(requestMapper::toResponse).toList();
+        return toResponses(requests);
     }
 
     @Override
@@ -123,7 +155,7 @@ public class RequestServiceImpl implements RequestService {
         if (!isParticipant(request, actor)) {
             throw new ForbiddenOperationException("No tienes permiso para consultar esta solicitud.");
         }
-        return requestMapper.toResponse(request);
+        return toResponse(request);
     }
 
     @Override
@@ -135,15 +167,23 @@ public class RequestServiceImpl implements RequestService {
         // RF3.3: solo antes de que sea aceptada
         if (!request.getStatus().isEditable()) {
             throw new BusinessRuleException("REQUEST_NOT_EDITABLE",
-                    "La solicitud ya no se puede modificar porque está en estado " + request.getStatus() + ".");
+                    "La solicitud ya no se puede modificar porque está " + request.getStatus().label() + ".");
         }
         validateLocation(request.getMode(), dto.getAddress(), dto.getLatitude(), dto.getLongitude(), dto.getZoneId());
+        if (request.getMode() == RequestMode.SCHEDULED) {
+            validateSlots(dto.getDateSlots());
+        }
 
         requestMapper.applyUpdate(request, dto);
         ServiceTypeInfo serviceType = catalogClient.findServiceType(request.getServiceTypeId())
                 .orElseThrow(() -> new InvalidRequestDataException("serviceTypeId", "El subservicio no existe."));
         policies.forEach(policy -> policy.validate(request, serviceType));
-        return requestMapper.toResponse(serviceRequestRepository.save(request));
+        ServiceRequest saved = serviceRequestRepository.save(request);
+        if (saved.getMode() == RequestMode.SCHEDULED) {
+            slotRepository.deleteByRequestId(saved.getId());
+            slotRepository.saveAll(requestMapper.toSlots(saved.getId(), dto.getDateSlots()));
+        }
+        return toResponse(saved);
     }
 
     @Override
@@ -155,15 +195,57 @@ public class RequestServiceImpl implements RequestService {
         }
 
         // RF3.4: el cliente y el profesional solo antes de que el servicio esté en curso; el administrador y el sistema siempre
-        transitionPolicy.check(request.getStatus(), RequestStatus.CANCELLED, actor.role());
+        RequestStatus previous = request.getStatus();
+        transitionPolicy.check(previous, RequestStatus.CANCELLED, actor.role());
 
         request.setStatus(RequestStatus.CANCELLED);
         request.setCancellationReason(dto.getReason().trim());
         request.setCancelledAt(Instant.now(clock));
 
         ServiceRequest saved = serviceRequestRepository.save(request);
+        if (saved.getMode() == RequestMode.URGENT && previous == RequestStatus.PENDING) {
+            withdrawOffers(saved.getId());
+        }
         notificationClient.notifyStatusChanged(saved);
-        return requestMapper.toResponse(saved);
+        return toResponse(saved);
+    }
+
+    private RequestResponseDTO toResponse(ServiceRequest request) {
+        return requestMapper.toResponse(request, slotRepository.findByRequestIdOrderByStartsAtAsc(request.getId()));
+    }
+
+    /** Carga las franjas de todas las solicitudes con una sola consulta. */
+    private List<RequestResponseDTO> toResponses(List<ServiceRequest> requests) {
+        if (requests.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, List<RequestDateSlot>> slotsByRequest = slotRepository
+                .findByRequestIdInOrderByStartsAtAsc(requests.stream().map(ServiceRequest::getId).toList())
+                .stream().collect(Collectors.groupingBy(RequestDateSlot::getRequestId));
+        return requests.stream()
+                .map(request -> requestMapper.toResponse(request, slotsByRequest.getOrDefault(request.getId(), List.of())))
+                .toList();
+    }
+
+    /** RN-02: avisa a los profesionales candidatos. Si el directorio no responde, la solicitud se crea igual (RNF-12). */
+    private void notifyCandidateProviders(ServiceRequest request) {
+        try {
+            List<Long> providers = providerDirectory.findProvidersFor(request.getServiceTypeId(), request.getZoneId());
+            if (!providers.isEmpty()) {
+                notificationClient.notifyProviders(request, providers);
+            }
+        } catch (DependencyUnavailableException ex) {
+            log.warn("No se pudo avisar a los profesionales de la solicitud {}: {}", request.getId(), ex.getMessage());
+        }
+    }
+
+    /** Cancelar no depende de dispatch: si no responde se registra y la solicitud igual se cancela (RNF-12). */
+    private void withdrawOffers(Long requestId) {
+        try {
+            dispatchClient.withdrawOffers(requestId);
+        } catch (DependencyUnavailableException ex) {
+            log.warn("No se pudieron retirar las ofertas de la solicitud {}: {}", requestId, ex.getMessage());
+        }
     }
 
     private List<ServiceRequest> findAllForAdmin(Long clientId, RequestStatus status) {
@@ -228,6 +310,25 @@ public class RequestServiceImpl implements RequestService {
         }
         if (mode == RequestMode.SCHEDULED && zoneId == null) {
             throw new InvalidRequestDataException("zoneId", "Una solicitud programada necesita la zona.");
+        }
+    }
+
+    /** RF3.2: una programada ofrece al menos una franja futura y cada franja termina después de empezar. */
+    private void validateSlots(List<DateSlotDTO> slots) {
+        if (slots == null || slots.isEmpty()) {
+            throw new InvalidRequestDataException("dateSlots",
+                    "Una solicitud programada necesita al menos una franja horaria.");
+        }
+        Instant now = Instant.now(clock);
+        boolean anyFuture = false;
+        for (DateSlotDTO slot : slots) {
+            if (!slot.getEndsAt().isAfter(slot.getStartsAt())) {
+                throw new InvalidRequestDataException("dateSlots", "Cada franja debe terminar después de empezar.");
+            }
+            anyFuture |= slot.getStartsAt().isAfter(now);
+        }
+        if (!anyFuture) {
+            throw new InvalidRequestDataException("dateSlots", "Al menos una franja debe ser futura.");
         }
     }
 }

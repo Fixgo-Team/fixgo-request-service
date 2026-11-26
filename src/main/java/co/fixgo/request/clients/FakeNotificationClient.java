@@ -1,6 +1,7 @@
 package co.fixgo.request.clients;
 
 import co.fixgo.request.models.ServiceRequest;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -23,5 +24,10 @@ public class FakeNotificationClient implements NotificationClient {
     @Override
     public void notifyStatusChanged(ServiceRequest request) {
         log.info("Notificación simulada: la solicitud {} pasó a {}", request.getId(), request.getStatus());
+    }
+
+    @Override
+    public void notifyProviders(ServiceRequest request, List<Long> providerIds) {
+        log.info("Notificación simulada: la solicitud {} se avisó a {} profesionales", request.getId(), providerIds.size());
     }
 }

@@ -1,6 +1,7 @@
 package co.fixgo.request.dto;
 
 import co.fixgo.request.models.RequestMode;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
@@ -8,6 +9,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * Datos para crear una solicitud urgente (RF3.1) o programada (RF3.2).
@@ -24,6 +26,10 @@ public class CreateRequestDTO {
 
     // RF3.2: obligatoria en programada; en urgente la resuelve dispatch a partir del punto (RNF-12)
     private Long zoneId;
+
+    // RF3.2: franjas que ofrece el cliente; en programada se exige al menos una futura (se valida en el servicio)
+    @Valid
+    private List<DateSlotDTO> dateSlots;
 
     @NotBlank(message = "La descripción es obligatoria.")
     @Size(max = 1000, message = "La descripción admite máximo 1000 caracteres.")
@@ -70,7 +76,15 @@ public class CreateRequestDTO {
         this.mode = mode;
     }
 
-    public Long getZoneId() {
+    public List<DateSlotDTO> getDateSlots() {
+        return dateSlots;
+    }
+
+    public void setDateSlots(List<DateSlotDTO> dateSlots) {
+        this.dateSlots = dateSlots;
+    }
+
+
         return zoneId;
     }
 

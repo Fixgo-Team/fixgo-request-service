@@ -4,6 +4,8 @@ import co.fixgo.request.models.RequestMode;
 import co.fixgo.request.models.RequestStatus;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Solicitud tal como la reciben Web y Móvil. Las fechas viajan en ISO 8601 y UTC.
@@ -15,6 +17,7 @@ public class RequestResponseDTO {
     private Long serviceTypeId;
     private Long providerId;
     private Long zoneId;
+    private List<DateSlotDTO> dateSlots = new ArrayList<>();
     private BigDecimal agreedValue;
     private RequestMode mode;
     private RequestStatus status;
@@ -65,7 +68,15 @@ public class RequestResponseDTO {
         this.providerId = providerId;
     }
 
-    public Long getZoneId() {
+    public List<DateSlotDTO> getDateSlots() {
+        return dateSlots;
+    }
+
+    public void setDateSlots(List<DateSlotDTO> dateSlots) {
+        this.dateSlots = dateSlots;
+    }
+
+
         return zoneId;
     }
 

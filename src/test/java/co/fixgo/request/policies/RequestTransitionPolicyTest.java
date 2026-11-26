@@ -116,8 +116,8 @@ class RequestTransitionPolicyTest {
     @Test
     void errorMessagesAreInSpanishAndNameTheStates() {
         assertThatThrownBy(() -> policy.check(COMPLETED, ACCEPTED, PROVIDER))
-                .hasMessage("La solicitud no puede pasar de COMPLETED a ACCEPTED.");
+                .hasMessage("La solicitud no puede pasar de «completada» a «aceptada».");
         assertThatThrownBy(() -> policy.check(IN_PROGRESS, CANCELLED, CLIENT))
-                .hasMessage("La solicitud ya no se puede cancelar porque está en estado IN_PROGRESS.");
+                .hasMessage("La solicitud ya no se puede cancelar porque está en curso.");
     }
 }

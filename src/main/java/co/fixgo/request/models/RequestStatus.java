@@ -9,28 +9,39 @@ import java.util.Set;
 public enum RequestStatus {
 
     /** Urgencia recién creada, esperando que un profesional la acepte. */
-    PENDING,
+    PENDING("pendiente"),
 
     /** Programada publicada, recibiendo cotizaciones. */
-    OPEN,
+    OPEN("abierta"),
 
     /** Profesional asignado. */
-    ACCEPTED,
+    ACCEPTED("aceptada"),
 
     /** El profesional va en camino. */
-    ON_THE_WAY,
+    ON_THE_WAY("en camino"),
 
     /** El servicio está en curso. */
-    IN_PROGRESS,
+    IN_PROGRESS("en curso"),
 
     /** Completada con informe de servicio (RN-05). */
-    COMPLETED,
+    COMPLETED("completada"),
 
     /** Cancelada con motivo (RF3.4). */
-    CANCELLED,
+    CANCELLED("cancelada"),
 
     /** Programada sin cotización aceptada a los 7 días (RF3.9). */
-    EXPIRED;
+    EXPIRED("expirada");
+
+    private final String label;
+
+    RequestStatus(String label) {
+        this.label = label;
+    }
+
+    /** Nombre del estado para los mensajes al usuario, en español y en minúscula: «en curso». */
+    public String label() {
+        return label;
+    }
 
     /** RF3.3: solo se modifica antes de que sea aceptada. */
     public boolean isEditable() {

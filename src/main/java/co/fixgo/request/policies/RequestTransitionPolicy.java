@@ -61,10 +61,10 @@ public class RequestTransitionPolicy {
         }
         if (!from.canTransitionTo(to)) {
             throw new BusinessRuleException(INVALID_TRANSITION,
-                    "La solicitud no puede pasar de " + from + " a " + to + ".");
+                    "La solicitud no puede pasar de «" + from.label() + "» a «" + to.label() + "».");
         }
         if (!ACTORS.getOrDefault(new Transition(from, to), Set.of()).contains(actor)) {
-            throw new ForbiddenOperationException("Tu rol no puede cambiar la solicitud de " + from + " a " + to + ".");
+            throw new ForbiddenOperationException("Tu rol no puede cambiar la solicitud de «" + from.label() + "» a «" + to.label() + "».");
         }
     }
 
@@ -80,7 +80,7 @@ public class RequestTransitionPolicy {
     private void checkCancellation(RequestStatus from, ActorRole actor) {
         if (!from.canTransitionTo(CANCELLED) || !cancellableFrom(actor).contains(from)) {
             throw new BusinessRuleException(NOT_CANCELLABLE,
-                    "La solicitud ya no se puede cancelar porque está en estado " + from + ".");
+                    "La solicitud ya no se puede cancelar porque está " + from.label() + ".");
         }
     }
 }

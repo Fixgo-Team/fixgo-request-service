@@ -1,11 +1,13 @@
 package co.fixgo.request.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * Datos editables de una solicitud antes de que sea aceptada (RF3.3).
@@ -18,6 +20,10 @@ public class UpdateRequestDTO {
     private String description;
 
     private Long zoneId;
+
+    // Reemplaza las franjas anteriores; obligatorias en una solicitud programada
+    @Valid
+    private List<DateSlotDTO> dateSlots;
 
     @Size(max = 255, message = "La dirección admite máximo 255 caracteres.")
     private String address;
@@ -51,7 +57,15 @@ public class UpdateRequestDTO {
         this.description = description;
     }
 
-    public Long getZoneId() {
+    public List<DateSlotDTO> getDateSlots() {
+        return dateSlots;
+    }
+
+    public void setDateSlots(List<DateSlotDTO> dateSlots) {
+        this.dateSlots = dateSlots;
+    }
+
+
         return zoneId;
     }
 
