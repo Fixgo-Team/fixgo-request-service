@@ -56,7 +56,7 @@ Todos los endpoints (salvo Swagger y `/actuator/health`) exigen un JWT de Fireba
 | `POST` crear, `PUT` actualizar | Solo el `CLIENT` dueño (el cliente sale del token, no del cuerpo) |
 | `GET /{id}` | Dueño, profesional asignado o `ADMIN`; si no, 403 |
 | `GET` lista | Cada quien ve solo lo propio (cliente: las suyas; profesional: las asignadas); `ADMIN` ve todo y puede filtrar por cliente |
-| `PATCH /{id}/cancel` | Dueño, profesional asignado o `ADMIN` |
+| `PATCH /{id}/cancel` | Dueño, profesional asignado, `ADMIN` o el sistema (`SERVICE`); ver estados abajo |
 | `/actuator/**` (salvo `health`) | Solo `ADMIN` |
 
 Sin token o con token inválido responde `401 UNAUTHORIZED`; con token válido pero sin permiso, `403 FORBIDDEN`, ambos con el wrapper `ApiResponse`.
@@ -70,6 +70,23 @@ Sin token o con token inválido responde `401 UNAUTHORIZED`; con token válido p
 | `POST` | `/api/v1/requests` | RF3.1, RF3.2 (programada: dirección y `zoneId` obligatorios) | 201 + cabecera `Location` |
 | `PUT` | `/api/v1/requests/{id}` | RF3.3 (solo `PENDING` u `OPEN`) | 200 |
 | `PATCH` | `/api/v1/requests/{id}/cancel` | RF3.4, RN-08 (borrado lógico) | 200 |
+
+### Estados y cancelación
+
+Los cambios de estado siguen la tabla 26 del SRS v3.1 y los decide `RequestTransitionPolicy` (paquete `policies`); `RequestStatus.allowedTargets()` define a qué estados se puede pasar desde cada uno:
+
+| Desde | Hacia |
+|---|---|
+| `PENDING` | `ACCEPTED`, `OPEN`, `CANCELLED` |
+| `OPEN` | `ACCEPTED`, `EXPIRED`, `CANCELLED` |
+| `ACCEPTED` | `ON_THE_WAY`, `CANCELLED` |
+| `ON_THE_WAY` | `IN_PROGRESS`, `CANCELLED` |
+| `IN_PROGRESS` | `COMPLETED`, `CANCELLED` |
+| `COMPLETED`, `CANCELLED`, `EXPIRED` | ninguno (la reapertura por garantía, RF4.9, está bloqueada por Q-033) |
+
+Quién puede cancelar (RF3.4, siempre con motivo): el cliente dueño en `PENDING`, `OPEN`, `ACCEPTED` y `ON_THE_WAY`; el profesional asignado en `ACCEPTED` y `ON_THE_WAY`; el `ADMIN` y el sistema en cualquier estado no final, incluido `IN_PROGRESS`. Si el actor ya no puede cancelar responde `409 REQUEST_NOT_CANCELLABLE`; una transición que la tabla no permite, `409 INVALID_STATUS_TRANSITION`; un rol que no le corresponde, `403`.
+
+Los subservicios que exigen datos del vehículo (`requiresVehicleData`) validan placa, marca y tipo con `VehicleDataPolicy`: `400 VEHICLE_DATA_REQUIRED` con el detalle de cada campo faltante.
 
 Ejemplo para probar en Swagger (`POST`, solicitud urgente; el cliente se toma del token):
 
@@ -151,12 +168,14 @@ Error de validación (`400 Bad Request`):
 | HTTP | `error.code` | Cuándo |
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Uno o más campos no cumplen las validaciones del DTO (cada campo en `details`) |
+| 400 | `VEHICLE_DATA_REQUIRED` | El subservicio exige placa, marca y tipo de vehículo y falta alguno |
 | 400 | `MALFORMED_REQUEST` | JSON mal formado, tipo de dato incorrecto o parámetro ausente |
 | 401 | `UNAUTHORIZED` | Sin token o con token inválido o vencido |
 | 403 | `FORBIDDEN` | Token válido, pero el rol o la propiedad del recurso no permiten la operación |
 | 404 | `RESOURCE_NOT_FOUND` / `ROUTE_NOT_FOUND` | El recurso o la ruta no existen |
 | 405 | `METHOD_NOT_ALLOWED` | Método HTTP no permitido en la ruta |
 | 409 | `BUSINESS_RULE_VIOLATION` o el código de la regla (ej. `QUOTE_ALREADY_ACCEPTED`) | Se incumple una regla de negocio o una transición de estado |
+| 409 | `INVALID_STATUS_TRANSITION` / `REQUEST_NOT_CANCELLABLE` | La tabla de estados no permite el cambio, o el actor ya no puede cancelar en ese estado |
 | 409 | `DATA_INTEGRITY_VIOLATION` | La base de datos rechazó la operación por una restricción (BD-05) |
 | 500 | `INTERNAL_ERROR` | Error inesperado (el detalle solo queda en el log, nunca el stack trace) |
 

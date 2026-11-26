@@ -23,6 +23,8 @@ import co.fixgo.request.mappers.RequestMapper;
 import co.fixgo.request.models.RequestMode;
 import co.fixgo.request.models.RequestStatus;
 import co.fixgo.request.models.ServiceRequest;
+import co.fixgo.request.policies.RequestTransitionPolicy;
+import co.fixgo.request.policies.VehicleDataPolicy;
 import co.fixgo.request.repositories.ServiceRequestRepository;
 import co.fixgo.request.security.ActorRole;
 import co.fixgo.request.security.CurrentActor;
@@ -66,7 +68,7 @@ class RequestServiceImplTest {
         catalogClient = mock(CatalogClient.class);
         notificationClient = mock(NotificationClient.class);
         service = new RequestServiceImpl(repository, new RequestMapper(), catalogClient, notificationClient,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                new RequestTransitionPolicy(), List.of(new VehicleDataPolicy()), Clock.fixed(NOW, ZoneOffset.UTC));
 
         when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(serviceType(true, true)));
         when(repository.save(any(ServiceRequest.class))).thenAnswer(invocation -> {
@@ -220,15 +222,6 @@ class RequestServiceImplTest {
     }
 
     @Test
-    void inProgressRequestCannotBeCancelled() {
-        ServiceRequest existing = existing(RequestStatus.IN_PROGRESS);
-
-        assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes"), CLIENT))
-                .isInstanceOf(BusinessRuleException.class)
-                .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
-    }
-
-    @Test
     void findByIdReturnsTheRequest() {
         ServiceRequest existing = existing(RequestStatus.PENDING);
 
@@ -347,6 +340,119 @@ class RequestServiceImplTest {
     }
 
     @Test
+    void vehicleDataIsRequiredWhenTheServiceTypeAsksForIt() {
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(vehicleServiceType()));
+        CreateRequestDTO dto = urgentDto();
+        dto.setVehiclePlate(null);
+
+        assertThatThrownBy(() -> service.create(dto, CLIENT))
+                .isInstanceOfSatisfying(InvalidRequestDataException.class,
+                        ex -> assertThat(ex.getCode()).isEqualTo("VEHICLE_DATA_REQUIRED"));
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void vehicleDataIsAcceptedWhenComplete() {
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(vehicleServiceType()));
+        CreateRequestDTO dto = urgentDto();
+        dto.setVehicleBrand("Chevrolet");
+        dto.setVehicleType("Automóvil");
+
+        assertThat(service.create(dto, CLIENT).getStatus()).isEqualTo(RequestStatus.PENDING);
+    }
+
+    @Test
+    void updateKeepsRequiringVehicleData() {
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(vehicleServiceType()));
+        ServiceRequest existing = existing(RequestStatus.PENDING);
+        UpdateRequestDTO dto = new UpdateRequestDTO();
+        dto.setDescription("Nueva descripción");
+        dto.setLatitude(new BigDecimal("2.930000"));
+        dto.setLongitude(new BigDecimal("-75.280000"));
+
+        assertThatThrownBy(() -> service.update(existing.getId(), dto, CLIENT))
+                .isInstanceOfSatisfying(InvalidRequestDataException.class,
+                        ex -> assertThat(ex.getCode()).isEqualTo("VEHICLE_DATA_REQUIRED"));
+        verify(repository, never()).save(existing);
+    }
+
+    @Test
+    void updateFailsWhenTheServiceTypeNoLongerExists() {
+        ServiceRequest existing = existing(RequestStatus.PENDING);
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.empty());
+        UpdateRequestDTO dto = new UpdateRequestDTO();
+        dto.setDescription("Nueva descripción");
+        dto.setLatitude(new BigDecimal("2.930000"));
+        dto.setLongitude(new BigDecimal("-75.280000"));
+
+        assertThatThrownBy(() -> service.update(existing.getId(), dto, CLIENT))
+                .isInstanceOf(InvalidRequestDataException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RequestStatus.class, names = {"PENDING", "OPEN", "ACCEPTED", "ON_THE_WAY"})
+    void clientCancelsBeforeTheServiceIsInProgress(RequestStatus status) {
+        ServiceRequest existing = existing(status);
+
+        assertThat(service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes"), CLIENT).getStatus())
+                .isEqualTo(RequestStatus.CANCELLED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = RequestStatus.class, names = {"IN_PROGRESS", "COMPLETED", "CANCELLED", "EXPIRED"})
+    void clientCannotCancelFromTheseStates(RequestStatus status) {
+        ServiceRequest existing = existing(status);
+
+        assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes"), CLIENT))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
+        verify(repository, never()).save(existing);
+    }
+
+    @Test
+    void assignedProviderCancelsOnlyWhileAcceptedOrOnTheWay() {
+        ServiceRequest accepted = existing(RequestStatus.ACCEPTED);
+        accepted.setProviderId(77L);
+        ServiceRequest inProgress = existing(RequestStatus.IN_PROGRESS);
+        inProgress.setProviderId(77L);
+
+        assertThat(service.cancel(accepted.getId(), new CancelRequestDTO("Imprevisto"), PROVIDER).getStatus())
+                .isEqualTo(RequestStatus.CANCELLED);
+        assertThatThrownBy(() -> service.cancel(inProgress.getId(), new CancelRequestDTO("Imprevisto"), PROVIDER))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
+    }
+
+    @Test
+    void adminAndSystemCancelEvenWhileInProgress() {
+        ServiceRequest first = existing(RequestStatus.IN_PROGRESS);
+        ServiceRequest second = existing(RequestStatus.IN_PROGRESS);
+
+        assertThat(service.cancel(first.getId(), new CancelRequestDTO("Suspensión de la cuenta"), ADMIN).getStatus())
+                .isEqualTo(RequestStatus.CANCELLED);
+        assertThat(service.cancel(second.getId(), new CancelRequestDTO("Verificación revocada"), SERVICE).getStatus())
+                .isEqualTo(RequestStatus.CANCELLED);
+    }
+
+    @Test
+    void finalRequestsCannotBeCancelledEvenByAdmin() {
+        ServiceRequest completed = existing(RequestStatus.COMPLETED);
+
+        assertThatThrownBy(() -> service.cancel(completed.getId(), new CancelRequestDTO("Error"), ADMIN))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
+    }
+
+    @Test
+    void providerThatIsNotAssignedCannotCancel() {
+        ServiceRequest accepted = existing(RequestStatus.ACCEPTED);
+        accepted.setProviderId(78L);
+
+        assertThatThrownBy(() -> service.cancel(accepted.getId(), new CancelRequestDTO("Imprevisto"), PROVIDER))
+                .isInstanceOf(ForbiddenOperationException.class);
+    }
+
+    @Test
     void strangersCannotCancel() {
         ServiceRequest existing = existing(RequestStatus.OPEN);
 
@@ -369,6 +475,10 @@ class RequestServiceImplTest {
 
         assertThatThrownBy(() -> service.findById(id, CLIENT))
                 .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    private ServiceTypeInfo vehicleServiceType() {
+        return new ServiceTypeInfo(serviceTypeId, true, true, new BigDecimal("85000.00"), false, true);
     }
 
     private ServiceTypeInfo serviceType(boolean active, boolean urgentAllowed) {

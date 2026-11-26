@@ -1,5 +1,8 @@
 package co.fixgo.request.models;
 
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * Estados de una solicitud (Anexo A.4 del SRS v3.1).
  */
@@ -34,8 +37,27 @@ public enum RequestStatus {
         return this == PENDING || this == OPEN;
     }
 
-    /** RF3.4: solo se cancela antes de que el servicio esté en curso. */
-    public boolean isCancellable() {
-        return this == PENDING || this == OPEN || this == ACCEPTED || this == ON_THE_WAY;
+    /**
+     * Estados a los que puede pasar desde este (Anexo A.4, tabla 26; data-dictionary.md §1). Los finales no tienen
+     * destinos. La reapertura por garantía (COMPLETED → ACCEPTED, RF4.9) no se modela: está bloqueada (Q-033).
+     */
+    public Set<RequestStatus> allowedTargets() {
+        return switch (this) {
+            case PENDING -> EnumSet.of(ACCEPTED, OPEN, CANCELLED);
+            case OPEN -> EnumSet.of(ACCEPTED, EXPIRED, CANCELLED);
+            case ACCEPTED -> EnumSet.of(ON_THE_WAY, CANCELLED);
+            case ON_THE_WAY -> EnumSet.of(IN_PROGRESS, CANCELLED);
+            case IN_PROGRESS -> EnumSet.of(COMPLETED, CANCELLED);
+            case COMPLETED, CANCELLED, EXPIRED -> EnumSet.noneOf(RequestStatus.class);
+        };
+    }
+
+    public boolean canTransitionTo(RequestStatus target) {
+        return allowedTargets().contains(target);
+    }
+
+    /** Un estado final no admite más cambios. */
+    public boolean isFinal() {
+        return allowedTargets().isEmpty();
     }
 }

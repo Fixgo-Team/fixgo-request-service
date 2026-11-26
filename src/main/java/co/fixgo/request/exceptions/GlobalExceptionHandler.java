@@ -46,8 +46,8 @@ public class GlobalExceptionHandler {
     /** 400: un dato es inválido según el contexto (validación hecha en el servicio). */
     @ExceptionHandler(InvalidRequestDataException.class)
     public ResponseEntity<ApiResponse<Void>> handleInvalidData(InvalidRequestDataException ex) {
-        return build(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR",
-                "Los datos enviados son inválidos.", ex.getDetails());
+        String message = ex.hasCustomMessage() ? ex.getMessage() : "Los datos enviados son inválidos.";
+        return build(HttpStatus.BAD_REQUEST, ex.getCode(), message, ex.getDetails());
     }
 
     /** 400: parámetros de ruta o de consulta que no cumplen sus validaciones. */

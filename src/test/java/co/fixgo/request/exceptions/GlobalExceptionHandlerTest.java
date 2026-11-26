@@ -11,6 +11,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
 import java.math.BigDecimal;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -63,6 +64,20 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
                 .andExpect(jsonPath("$.error.details.description").value("La descripción es obligatoria."))
                 .andExpect(jsonPath("$.error.details.price").value("El precio debe ser mayor que cero."));
+    }
+
+    @Test
+    void returns400WithTheCodeAndMessageOfTheRuleWhenTheDataIsInvalidByContext() throws Exception {
+        mockMvc.perform(get("/test/vehicle-data"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VEHICLE_DATA_REQUIRED"))
+                .andExpect(jsonPath("$.error.message").value("Falta la placa."))
+                .andExpect(jsonPath("$.error.details.vehiclePlate").value("La placa es obligatoria."));
+        mockMvc.perform(get("/test/invalid-field"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.error.message").value("Los datos enviados son inválidos."))
+                .andExpect(jsonPath("$.error.details.zoneId").value("La zona es obligatoria."));
     }
 
     @Test
@@ -164,6 +179,17 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/conflict")
         ResponseEntity<ApiResponse<Void>> conflict() {
             throw new BusinessRuleException("QUOTE_ALREADY_ACCEPTED", "La solicitud ya tiene una cotización aceptada.");
+        }
+
+        @GetMapping("/test/vehicle-data")
+        ResponseEntity<ApiResponse<Void>> vehicleData() {
+            throw new InvalidRequestDataException("VEHICLE_DATA_REQUIRED", "Falta la placa.",
+                    Map.of("vehiclePlate", "La placa es obligatoria."));
+        }
+
+        @GetMapping("/test/invalid-field")
+        ResponseEntity<ApiResponse<Void>> invalidField() {
+            throw new InvalidRequestDataException("zoneId", "La zona es obligatoria.");
         }
 
         @GetMapping("/test/unauthorized")

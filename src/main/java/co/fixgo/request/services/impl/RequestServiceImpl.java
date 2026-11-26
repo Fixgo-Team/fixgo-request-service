@@ -15,6 +15,8 @@ import co.fixgo.request.mappers.RequestMapper;
 import co.fixgo.request.models.RequestMode;
 import co.fixgo.request.models.RequestStatus;
 import co.fixgo.request.models.ServiceRequest;
+import co.fixgo.request.policies.RequestPolicy;
+import co.fixgo.request.policies.RequestTransitionPolicy;
 import co.fixgo.request.repositories.ServiceRequestRepository;
 import co.fixgo.request.security.ActorRole;
 import co.fixgo.request.security.CurrentActor;
@@ -37,17 +39,23 @@ public class RequestServiceImpl implements RequestService {
     private final RequestMapper requestMapper;
     private final CatalogClient catalogClient;
     private final NotificationClient notificationClient;
+    private final RequestTransitionPolicy transitionPolicy;
+    private final List<RequestPolicy> policies;
     private final Clock clock;
 
     public RequestServiceImpl(ServiceRequestRepository serviceRequestRepository,
                               RequestMapper requestMapper,
                               CatalogClient catalogClient,
                               NotificationClient notificationClient,
+                              RequestTransitionPolicy transitionPolicy,
+                              List<RequestPolicy> policies,
                               Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.requestMapper = requestMapper;
         this.catalogClient = catalogClient;
         this.notificationClient = notificationClient;
+        this.transitionPolicy = transitionPolicy;
+        this.policies = policies;
         this.clock = clock;
     }
 
@@ -69,6 +77,7 @@ public class RequestServiceImpl implements RequestService {
 
         ServiceRequest request = requestMapper.toEntity(dto);
         request.setClientId(actor.userId());
+        policies.forEach(policy -> policy.validate(request, serviceType));
         // Anexo A.4: una urgencia empieza en PENDING y una programada en OPEN
         request.setStatus(dto.getMode() == RequestMode.URGENT ? RequestStatus.PENDING : RequestStatus.OPEN);
         // RN-09: en una urgencia el valor acordado es el precio de referencia vigente al crear
@@ -131,6 +140,9 @@ public class RequestServiceImpl implements RequestService {
         validateLocation(request.getMode(), dto.getAddress(), dto.getLatitude(), dto.getLongitude(), dto.getZoneId());
 
         requestMapper.applyUpdate(request, dto);
+        ServiceTypeInfo serviceType = catalogClient.findServiceType(request.getServiceTypeId())
+                .orElseThrow(() -> new InvalidRequestDataException("serviceTypeId", "El subservicio no existe."));
+        policies.forEach(policy -> policy.validate(request, serviceType));
         return requestMapper.toResponse(serviceRequestRepository.save(request));
     }
 
@@ -138,15 +150,12 @@ public class RequestServiceImpl implements RequestService {
     @Transactional
     public RequestResponseDTO cancel(Long id, CancelRequestDTO dto, CurrentActor actor) {
         ServiceRequest request = getOrThrow(id);
-        if (!isParticipant(request, actor)) {
+        if (!actor.is(ActorRole.SERVICE) && !isParticipant(request, actor)) {
             throw new ForbiddenOperationException("No tienes permiso para cancelar esta solicitud.");
         }
 
-        // RF3.4: solo antes de que el servicio esté en curso
-        if (!request.getStatus().isCancellable()) {
-            throw new BusinessRuleException("REQUEST_NOT_CANCELLABLE",
-                    "La solicitud ya no se puede cancelar porque está en estado " + request.getStatus() + ".");
-        }
+        // RF3.4: el cliente y el profesional solo antes de que el servicio esté en curso; el administrador y el sistema siempre
+        transitionPolicy.check(request.getStatus(), RequestStatus.CANCELLED, actor.role());
 
         request.setStatus(RequestStatus.CANCELLED);
         request.setCancellationReason(dto.getReason().trim());

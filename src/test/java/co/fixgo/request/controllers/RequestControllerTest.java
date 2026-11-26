@@ -22,6 +22,8 @@ import co.fixgo.request.mappers.RequestMapper;
 import co.fixgo.request.models.RequestMode;
 import co.fixgo.request.models.RequestStatus;
 import co.fixgo.request.models.ServiceRequest;
+import co.fixgo.request.policies.RequestTransitionPolicy;
+import co.fixgo.request.policies.VehicleDataPolicy;
 import co.fixgo.request.repositories.ServiceRequestRepository;
 import co.fixgo.request.security.ApiSecurityErrorHandler;
 import co.fixgo.request.security.JwtCurrentActorProvider;
@@ -47,7 +49,8 @@ import org.springframework.test.web.servlet.MockMvc;
  */
 @WebMvcTest(RequestController.class)
 @Import({SecurityConfig.class, ApiSecurityErrorHandler.class, JwtCurrentActorProvider.class,
-        RequestServiceImpl.class, RequestMapper.class, ClockConfig.class})
+        RequestServiceImpl.class, RequestMapper.class, RequestTransitionPolicy.class, VehicleDataPolicy.class,
+        ClockConfig.class})
 class RequestControllerTest {
 
     private static final String URGENT_BODY = "{\"serviceTypeId\":7,\"mode\":\"URGENT\","
@@ -225,6 +228,35 @@ class RequestControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Ya lo solucioné\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+    }
+
+    @Test
+    void clientCannotCancelAServiceInProgressButAdminCan() throws Exception {
+        ServiceRequest inProgress = stored(10L, 55L, 77L);
+        inProgress.setStatus(RequestStatus.IN_PROGRESS);
+
+        mockMvc.perform(patch("/api/v1/requests/10/cancel").with(user(55L, "CLIENT"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Motivo\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("REQUEST_NOT_CANCELLABLE"));
+        mockMvc.perform(patch("/api/v1/requests/10/cancel").with(user(1L, "ADMIN"))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"Cuenta suspendida\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+    }
+
+    @Test
+    void vehicleDataIsRequiredForServicesThatAskForIt() throws Exception {
+        when(catalogClient.findServiceType(7L)).thenReturn(Optional.of(
+                new ServiceTypeInfo(7L, true, true, new BigDecimal("50000.00"), false, true)));
+
+        mockMvc.perform(post("/api/v1/requests").with(user(55L, "CLIENT"))
+                        .contentType(MediaType.APPLICATION_JSON).content(URGENT_BODY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VEHICLE_DATA_REQUIRED"))
+                .andExpect(jsonPath("$.error.details.vehiclePlate").exists())
+                .andExpect(jsonPath("$.error.details.vehicleBrand").exists())
+                .andExpect(jsonPath("$.error.details.vehicleType").exists());
     }
 
     @Test
