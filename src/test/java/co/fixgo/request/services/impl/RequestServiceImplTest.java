@@ -24,6 +24,7 @@ import co.fixgo.request.models.RequestStatus;
 import co.fixgo.request.models.ServiceRequest;
 import co.fixgo.request.repositories.ServiceRequestRepository;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -136,6 +137,76 @@ class RequestServiceImplTest {
         assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes")))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
+    }
+
+    @Test
+    void openRequestIsUpdated() {
+        ServiceRequest existing = existing(RequestStatus.PENDING);
+        UpdateRequestDTO dto = new UpdateRequestDTO();
+        dto.setDescription("  Ahora tampoco prende el radio ");
+        dto.setLatitude(new BigDecimal("2.930000"));
+        dto.setLongitude(new BigDecimal("-75.280000"));
+        dto.setVehiclePlate("xyz12d");
+
+        RequestResponseDTO result = service.update(existing.getId(), dto);
+
+        assertThat(result.getDescription()).isEqualTo("Ahora tampoco prende el radio");
+        assertThat(result.getVehiclePlate()).isEqualTo("XYZ12D");
+    }
+
+    @Test
+    void updateWithOnlyLatitudeIsRejected() {
+        ServiceRequest existing = existing(RequestStatus.PENDING);
+        UpdateRequestDTO dto = new UpdateRequestDTO();
+        dto.setDescription("Nueva descripción");
+        dto.setLatitude(new BigDecimal("2.930000"));
+
+        assertThatThrownBy(() -> service.update(existing.getId(), dto))
+                .isInstanceOf(InvalidRequestDataException.class);
+    }
+
+    @Test
+    void findByIdReturnsTheRequest() {
+        ServiceRequest existing = existing(RequestStatus.PENDING);
+
+        assertThat(service.findById(existing.getId()).getId()).isEqualTo(existing.getId());
+    }
+
+    @Test
+    void findAllFiltersByClientAndStatus() {
+        UUID clientId = UUID.randomUUID();
+        ServiceRequest open = existing(RequestStatus.OPEN);
+        ServiceRequest pending = existing(RequestStatus.PENDING);
+        when(repository.findByClientIdAndStatusOrderByCreatedAtDesc(clientId, RequestStatus.OPEN))
+                .thenReturn(List.of(open));
+        when(repository.findByClientIdOrderByCreatedAtDesc(clientId))
+                .thenReturn(List.of(open, pending));
+        when(repository.findByStatusOrderByCreatedAtDesc(RequestStatus.PENDING))
+                .thenReturn(List.of(pending));
+        when(repository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
+
+        assertThat(service.findAll(clientId, RequestStatus.OPEN)).hasSize(1);
+        assertThat(service.findAll(clientId, null)).hasSize(2);
+        assertThat(service.findAll(null, RequestStatus.PENDING)).hasSize(1);
+        assertThat(service.findAll(null, null)).isEmpty();
+    }
+
+    @Test
+    void inactiveServiceTypeIsRejected() {
+        when(catalogClient.findServiceType(serviceTypeId))
+                .thenReturn(Optional.of(new ServiceTypeInfo(serviceTypeId, false, true)));
+
+        assertThatThrownBy(() -> service.create(urgentDto()))
+                .isInstanceOf(BusinessRuleException.class)
+                .extracting("code").isEqualTo("SERVICE_TYPE_INACTIVE");
+    }
+
+    @Test
+    void unknownServiceTypeIsRejected() {
+        when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.create(urgentDto()))
+                .isInstanceOf(InvalidRequestDataException.class);
     }
 
     @Test

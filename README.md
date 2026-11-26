@@ -13,8 +13,8 @@ Microservicio de solicitudes de FixGo: solicitudes urgentes y programadas, cotiz
 ## Requisitos
 
 - JDK 17 o superior
-- Maven 3.9 o superior
-- Docker y Docker Compose
+- Maven: no hace falta instalarlo, el repo incluye Maven Wrapper (`mvnw` / `mvnw.cmd`, Maven 3.9)
+- Docker y Docker Compose (también lo usan las pruebas de integración con Testcontainers)
 
 ## Ejecutar con Docker
 
@@ -27,14 +27,16 @@ docker compose up --build
 
 ```bash
 docker compose up -d request-db
-mvn spring-boot:run
+./mvnw spring-boot:run      # en Windows: .\mvnw.cmd spring-boot:run
 ```
 
 ## Pruebas
 
 ```bash
-mvn verify
+./mvnw verify               # en Windows: .\mvnw.cmd verify
 ```
+
+`verify` ejecuta las pruebas unitarias (`*Test`), las de integración (`*IT`, con un MySQL 8 real en Testcontainers, requieren Docker) y el control de cobertura de JaCoCo: mínimo 80 % de líneas en todo el servicio y 90 % en `services`, `policies` y `models`. Si no se alcanza, el build falla. El informe queda en `target/site/jacoco/index.html`.
 
 ## Endpoints de solicitudes
 
