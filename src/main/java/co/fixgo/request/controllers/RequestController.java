@@ -6,6 +6,7 @@ import co.fixgo.request.dto.CreateRequestDTO;
 import co.fixgo.request.dto.RequestResponseDTO;
 import co.fixgo.request.dto.UpdateRequestDTO;
 import co.fixgo.request.models.RequestStatus;
+import co.fixgo.request.security.CurrentActorProvider;
 import co.fixgo.request.services.RequestService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,41 +35,44 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 public class RequestController {
 
     private final RequestService requestService;
+    private final CurrentActorProvider actorProvider;
 
-    public RequestController(RequestService requestService) {
+    public RequestController(RequestService requestService, CurrentActorProvider actorProvider) {
         this.requestService = requestService;
+        this.actorProvider = actorProvider;
     }
 
     @GetMapping
-    @Operation(summary = "Listar solicitudes", description = "RF4.1. Filtros opcionales por cliente y estado.")
+    @Operation(summary = "Listar solicitudes", description = "RF4.1. El cliente ve las suyas, el profesional las que tiene asignadas y el administrador todas "
+                    + "(solo el administrador puede filtrar por cliente). Filtro opcional por estado.")
     public ResponseEntity<ApiResponse<List<RequestResponseDTO>>> findAll(
             @RequestParam(required = false) Long clientId,
             @RequestParam(required = false) RequestStatus status) {
-        return ResponseEntity.ok(new ApiResponse<>(requestService.findAll(clientId, status)));
+        return ResponseEntity.ok(new ApiResponse<>(requestService.findAll(clientId, status, actorProvider.current())));
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Consultar una solicitud", description = "RF4.6.")
+    @Operation(summary = "Consultar una solicitud", description = "RF4.6. Solo el dueño, el profesional asignado o un administrador; si no, 403.")
     public ResponseEntity<ApiResponse<RequestResponseDTO>> findById(@PathVariable Long id) {
-        return ResponseEntity.ok(new ApiResponse<>(requestService.findById(id)));
+        return ResponseEntity.ok(new ApiResponse<>(requestService.findById(id, actorProvider.current())));
     }
 
     @PostMapping
     @Operation(summary = "Crear una solicitud",
-            description = "RF3.1 (URGENT, requiere latitud y longitud) y RF3.2 (SCHEDULED, requiere dirección y zona). "
+            description = "RF3.1 (URGENT, requiere latitud y longitud) y RF3.2 (SCHEDULED, requiere dirección y zona). Solo CLIENT; el dueño es el cliente del token. "
                     + "Responde 201 con la cabecera Location de la solicitud creada.")
     public ResponseEntity<ApiResponse<RequestResponseDTO>> create(@Valid @RequestBody CreateRequestDTO dto) {
-        RequestResponseDTO created = requestService.create(dto);
+        RequestResponseDTO created = requestService.create(dto, actorProvider.current());
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(created.getId()).toUri();
         return ResponseEntity.created(location).body(new ApiResponse<>(created));
     }
 
     @PutMapping("/{id}")
-    @Operation(summary = "Actualizar una solicitud", description = "RF3.3. Solo en estado PENDING u OPEN.")
+    @Operation(summary = "Actualizar una solicitud", description = "RF3.3. Solo el cliente dueño y solo en estado PENDING u OPEN.")
     public ResponseEntity<ApiResponse<RequestResponseDTO>> update(@PathVariable Long id,
                                                                   @Valid @RequestBody UpdateRequestDTO dto) {
-        return ResponseEntity.ok(new ApiResponse<>(requestService.update(id, dto)));
+        return ResponseEntity.ok(new ApiResponse<>(requestService.update(id, dto, actorProvider.current())));
     }
 
     @PatchMapping("/{id}/cancel")
@@ -76,6 +80,6 @@ public class RequestController {
             description = "RF3.4 y RN-08. Borrado lógico: pasa a CANCELLED con motivo; nunca se elimina.")
     public ResponseEntity<ApiResponse<RequestResponseDTO>> cancel(@PathVariable Long id,
                                                                   @Valid @RequestBody CancelRequestDTO dto) {
-        return ResponseEntity.ok(new ApiResponse<>(requestService.cancel(id, dto)));
+        return ResponseEntity.ok(new ApiResponse<>(requestService.cancel(id, dto, actorProvider.current())));
     }
 }

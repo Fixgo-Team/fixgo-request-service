@@ -16,6 +16,7 @@ import co.fixgo.request.dto.CreateRequestDTO;
 import co.fixgo.request.dto.RequestResponseDTO;
 import co.fixgo.request.dto.UpdateRequestDTO;
 import co.fixgo.request.exceptions.BusinessRuleException;
+import co.fixgo.request.exceptions.ForbiddenOperationException;
 import co.fixgo.request.exceptions.InvalidRequestDataException;
 import co.fixgo.request.exceptions.ResourceNotFoundException;
 import co.fixgo.request.mappers.RequestMapper;
@@ -23,6 +24,8 @@ import co.fixgo.request.models.RequestMode;
 import co.fixgo.request.models.RequestStatus;
 import co.fixgo.request.models.ServiceRequest;
 import co.fixgo.request.repositories.ServiceRequestRepository;
+import co.fixgo.request.security.ActorRole;
+import co.fixgo.request.security.CurrentActor;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,6 +35,9 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 
 /**
  * Pruebas unitarias de las reglas de negocio, con dobles de las interfaces (sin base de datos ni Spring).
@@ -39,6 +45,12 @@ import org.junit.jupiter.api.Test;
 class RequestServiceImplTest {
 
     private static final Instant NOW = Instant.parse("2026-11-12T01:30:00Z");
+
+    private static final CurrentActor CLIENT = new CurrentActor(55L, ActorRole.CLIENT);
+    private static final CurrentActor OTHER_CLIENT = new CurrentActor(56L, ActorRole.CLIENT);
+    private static final CurrentActor PROVIDER = new CurrentActor(77L, ActorRole.PROVIDER);
+    private static final CurrentActor ADMIN = new CurrentActor(1L, ActorRole.ADMIN);
+    private static final CurrentActor SERVICE = new CurrentActor(9L, ActorRole.SERVICE);
 
     private final Long serviceTypeId = 7L;
     private final AtomicLong ids = new AtomicLong(100);
@@ -68,7 +80,7 @@ class RequestServiceImplTest {
 
     @Test
     void urgentRequestStartsPendingAndNotifies() {
-        RequestResponseDTO result = service.create(urgentDto());
+        RequestResponseDTO result = service.create(urgentDto(), CLIENT);
 
         assertThat(result.getStatus()).isEqualTo(RequestStatus.PENDING);
         assertThat(result.getVehiclePlate()).isEqualTo("ABC123");
@@ -77,14 +89,14 @@ class RequestServiceImplTest {
 
     @Test
     void urgentRequestStoresReferencePriceAsAgreedValue() {
-        RequestResponseDTO result = service.create(urgentDto());
+        RequestResponseDTO result = service.create(urgentDto(), CLIENT);
 
         assertThat(result.getAgreedValue()).isEqualByComparingTo("85000.00");
     }
 
     @Test
     void scheduledRequestStartsOpenWithoutAgreedValue() {
-        RequestResponseDTO result = service.create(scheduledDto());
+        RequestResponseDTO result = service.create(scheduledDto(), CLIENT);
 
         assertThat(result.getStatus()).isEqualTo(RequestStatus.OPEN);
         assertThat(result.getZoneId()).isEqualTo(3L);
@@ -97,7 +109,7 @@ class RequestServiceImplTest {
         dto.setLatitude(null);
         dto.setLongitude(null);
 
-        assertThatThrownBy(() -> service.create(dto))
+        assertThatThrownBy(() -> service.create(dto, CLIENT))
                 .isInstanceOf(InvalidRequestDataException.class);
         verify(repository, never()).save(any());
     }
@@ -107,7 +119,7 @@ class RequestServiceImplTest {
         CreateRequestDTO dto = scheduledDto();
         dto.setAddress("  ");
 
-        assertThatThrownBy(() -> service.create(dto))
+        assertThatThrownBy(() -> service.create(dto, CLIENT))
                 .isInstanceOf(InvalidRequestDataException.class);
     }
 
@@ -116,7 +128,7 @@ class RequestServiceImplTest {
         CreateRequestDTO dto = scheduledDto();
         dto.setZoneId(null);
 
-        assertThatThrownBy(() -> service.create(dto))
+        assertThatThrownBy(() -> service.create(dto, CLIENT))
                 .isInstanceOfSatisfying(InvalidRequestDataException.class,
                         ex -> assertThat(ex.getDetails()).containsKey("zoneId"));
         verify(repository, never()).save(any());
@@ -127,14 +139,14 @@ class RequestServiceImplTest {
         CreateRequestDTO dto = urgentDto();
         dto.setZoneId(null);
 
-        assertThat(service.create(dto).getStatus()).isEqualTo(RequestStatus.PENDING);
+        assertThat(service.create(dto, CLIENT).getStatus()).isEqualTo(RequestStatus.PENDING);
     }
 
     @Test
     void urgentModeIsRejectedWhenServiceTypeDoesNotAllowIt() {
         when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(serviceType(true, false)));
 
-        assertThatThrownBy(() -> service.create(urgentDto()))
+        assertThatThrownBy(() -> service.create(urgentDto(), CLIENT))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("URGENT_MODE_NOT_ALLOWED");
     }
@@ -143,7 +155,7 @@ class RequestServiceImplTest {
     void inactiveServiceTypeIsRejected() {
         when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.of(serviceType(false, true)));
 
-        assertThatThrownBy(() -> service.create(urgentDto()))
+        assertThatThrownBy(() -> service.create(urgentDto(), CLIENT))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("SERVICE_TYPE_INACTIVE");
     }
@@ -152,7 +164,7 @@ class RequestServiceImplTest {
     void unknownServiceTypeIsRejected() {
         when(catalogClient.findServiceType(serviceTypeId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.create(urgentDto()))
+        assertThatThrownBy(() -> service.create(urgentDto(), CLIENT))
                 .isInstanceOf(InvalidRequestDataException.class);
     }
 
@@ -164,7 +176,7 @@ class RequestServiceImplTest {
         dto.setLatitude(new BigDecimal("2.927300"));
         dto.setLongitude(new BigDecimal("-75.281900"));
 
-        assertThatThrownBy(() -> service.update(existing.getId(), dto))
+        assertThatThrownBy(() -> service.update(existing.getId(), dto, CLIENT))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("REQUEST_NOT_EDITABLE");
     }
@@ -178,7 +190,7 @@ class RequestServiceImplTest {
         dto.setLongitude(new BigDecimal("-75.280000"));
         dto.setVehiclePlate("xyz12d");
 
-        RequestResponseDTO result = service.update(existing.getId(), dto);
+        RequestResponseDTO result = service.update(existing.getId(), dto, CLIENT);
 
         assertThat(result.getDescription()).isEqualTo("Ahora tampoco prende el radio");
         assertThat(result.getVehiclePlate()).isEqualTo("XYZ12D");
@@ -191,7 +203,7 @@ class RequestServiceImplTest {
         dto.setDescription("Nueva descripción");
         dto.setLatitude(new BigDecimal("2.930000"));
 
-        assertThatThrownBy(() -> service.update(existing.getId(), dto))
+        assertThatThrownBy(() -> service.update(existing.getId(), dto, CLIENT))
                 .isInstanceOf(InvalidRequestDataException.class);
     }
 
@@ -199,7 +211,7 @@ class RequestServiceImplTest {
     void openRequestIsCancelledWithReason() {
         ServiceRequest existing = existing(RequestStatus.OPEN);
 
-        RequestResponseDTO result = service.cancel(existing.getId(), new CancelRequestDTO("Ya lo solucioné"));
+        RequestResponseDTO result = service.cancel(existing.getId(), new CancelRequestDTO("Ya lo solucioné"), CLIENT);
 
         assertThat(result.getStatus()).isEqualTo(RequestStatus.CANCELLED);
         assertThat(result.getCancellationReason()).isEqualTo("Ya lo solucioné");
@@ -211,7 +223,7 @@ class RequestServiceImplTest {
     void inProgressRequestCannotBeCancelled() {
         ServiceRequest existing = existing(RequestStatus.IN_PROGRESS);
 
-        assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes")))
+        assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Cambio de planes"), CLIENT))
                 .isInstanceOf(BusinessRuleException.class)
                 .extracting("code").isEqualTo("REQUEST_NOT_CANCELLABLE");
     }
@@ -220,34 +232,142 @@ class RequestServiceImplTest {
     void findByIdReturnsTheRequest() {
         ServiceRequest existing = existing(RequestStatus.PENDING);
 
-        assertThat(service.findById(existing.getId()).getId()).isEqualTo(existing.getId());
+        assertThat(service.findById(existing.getId(), CLIENT).getId()).isEqualTo(existing.getId());
     }
 
     @Test
-    void findAllFiltersByClientAndStatus() {
-        Long clientId = 55L;
-        ServiceRequest open = existing(RequestStatus.OPEN);
-        ServiceRequest pending = existing(RequestStatus.PENDING);
-        when(repository.findByClientIdAndStatusOrderByCreatedAtDesc(clientId, RequestStatus.OPEN))
-                .thenReturn(List.of(open));
-        when(repository.findByClientIdOrderByCreatedAtDesc(clientId))
-                .thenReturn(List.of(open, pending));
-        when(repository.findByStatusOrderByCreatedAtDesc(RequestStatus.PENDING))
-                .thenReturn(List.of(pending));
-        when(repository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
+    void createTakesTheClientFromTheActor() {
+        CreateRequestDTO dto = scheduledDto();
 
-        assertThat(service.findAll(clientId, RequestStatus.OPEN)).hasSize(1);
-        assertThat(service.findAll(clientId, null)).hasSize(2);
-        assertThat(service.findAll(null, RequestStatus.PENDING)).hasSize(1);
-        assertThat(service.findAll(null, null)).isEmpty();
+        service.create(dto, CLIENT);
+
+        ArgumentCaptor<ServiceRequest> captor = ArgumentCaptor.forClass(ServiceRequest.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getClientId()).isEqualTo(55L);
     }
 
+    @ParameterizedTest
+    @EnumSource(value = ActorRole.class, names = {"PROVIDER", "ADMIN", "SERVICE"})
+    void onlyClientsCanCreate(ActorRole role) {
+        assertThatThrownBy(() -> service.create(urgentDto(), new CurrentActor(9L, role)))
+                .isInstanceOf(ForbiddenOperationException.class);
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void clientListsOnlyOwnRequests() {
+        ServiceRequest open = existing(RequestStatus.OPEN);
+        when(repository.findByClientIdOrderByCreatedAtDesc(55L)).thenReturn(List.of(open));
+        when(repository.findByClientIdAndStatusOrderByCreatedAtDesc(55L, RequestStatus.OPEN))
+                .thenReturn(List.of(open));
+
+        assertThat(service.findAll(null, null, CLIENT)).hasSize(1);
+        assertThat(service.findAll(55L, RequestStatus.OPEN, CLIENT)).hasSize(1);
+    }
+
+    @Test
+    void clientCannotListAnotherClientsRequests() {
+        assertThatThrownBy(() -> service.findAll(56L, null, CLIENT))
+                .isInstanceOf(ForbiddenOperationException.class);
+    }
+
+    @Test
+    void providerListsOnlyAssignedRequests() {
+        ServiceRequest accepted = existing(RequestStatus.ACCEPTED);
+        when(repository.findByProviderIdOrderByCreatedAtDesc(77L)).thenReturn(List.of(accepted));
+        when(repository.findByProviderIdAndStatusOrderByCreatedAtDesc(77L, RequestStatus.ACCEPTED))
+                .thenReturn(List.of(accepted));
+
+        assertThat(service.findAll(null, null, PROVIDER)).hasSize(1);
+        assertThat(service.findAll(null, RequestStatus.ACCEPTED, PROVIDER)).hasSize(1);
+        assertThatThrownBy(() -> service.findAll(55L, null, PROVIDER))
+                .isInstanceOf(ForbiddenOperationException.class);
+    }
+
+    @Test
+    void adminListsEverythingWithOptionalFilters() {
+        ServiceRequest open = existing(RequestStatus.OPEN);
+        ServiceRequest pending = existing(RequestStatus.PENDING);
+        when(repository.findByClientIdAndStatusOrderByCreatedAtDesc(55L, RequestStatus.OPEN))
+                .thenReturn(List.of(open));
+        when(repository.findByClientIdOrderByCreatedAtDesc(55L)).thenReturn(List.of(open, pending));
+        when(repository.findByStatusOrderByCreatedAtDesc(RequestStatus.PENDING)).thenReturn(List.of(pending));
+        when(repository.findAllByOrderByCreatedAtDesc()).thenReturn(List.of());
+
+        assertThat(service.findAll(55L, RequestStatus.OPEN, ADMIN)).hasSize(1);
+        assertThat(service.findAll(55L, null, ADMIN)).hasSize(2);
+        assertThat(service.findAll(null, RequestStatus.PENDING, ADMIN)).hasSize(1);
+        assertThat(service.findAll(null, null, ADMIN)).isEmpty();
+    }
+
+    @Test
+    void internalServicesCannotListRequests() {
+        assertThatThrownBy(() -> service.findAll(null, null, SERVICE))
+                .isInstanceOf(ForbiddenOperationException.class);
+    }
+
+    @Test
+    void ownerAssignedProviderAndAdminCanReadARequest() {
+        ServiceRequest accepted = existing(RequestStatus.ACCEPTED);
+        accepted.setProviderId(77L);
+
+        assertThat(service.findById(accepted.getId(), CLIENT)).isNotNull();
+        assertThat(service.findById(accepted.getId(), PROVIDER)).isNotNull();
+        assertThat(service.findById(accepted.getId(), ADMIN)).isNotNull();
+    }
+
+    @Test
+    void strangersCannotReadARequest() {
+        ServiceRequest accepted = existing(RequestStatus.ACCEPTED);
+        accepted.setProviderId(77L);
+
+        assertThatThrownBy(() -> service.findById(accepted.getId(), OTHER_CLIENT))
+                .isInstanceOf(ForbiddenOperationException.class);
+        assertThatThrownBy(() -> service.findById(accepted.getId(), new CurrentActor(78L, ActorRole.PROVIDER)))
+                .isInstanceOf(ForbiddenOperationException.class);
+        assertThatThrownBy(() -> service.findById(accepted.getId(), SERVICE))
+                .isInstanceOf(ForbiddenOperationException.class);
+    }
+
+    @Test
+    void onlyTheOwnerClientCanUpdate() {
+        ServiceRequest existing = existing(RequestStatus.PENDING);
+        UpdateRequestDTO dto = new UpdateRequestDTO();
+        dto.setDescription("Nueva descripción");
+        dto.setLatitude(new BigDecimal("2.930000"));
+        dto.setLongitude(new BigDecimal("-75.280000"));
+
+        assertThatThrownBy(() -> service.update(existing.getId(), dto, OTHER_CLIENT))
+                .isInstanceOf(ForbiddenOperationException.class);
+        assertThatThrownBy(() -> service.update(existing.getId(), dto, ADMIN))
+                .isInstanceOf(ForbiddenOperationException.class);
+        assertThatThrownBy(() -> service.update(existing.getId(), dto, PROVIDER))
+                .isInstanceOf(ForbiddenOperationException.class);
+        verify(repository, never()).save(existing);
+    }
+
+    @Test
+    void strangersCannotCancel() {
+        ServiceRequest existing = existing(RequestStatus.OPEN);
+
+        assertThatThrownBy(() -> service.cancel(existing.getId(), new CancelRequestDTO("Motivo"), OTHER_CLIENT))
+                .isInstanceOf(ForbiddenOperationException.class);
+        verify(repository, never()).save(existing);
+    }
+
+    @Test
+    void adminCanCancel() {
+        ServiceRequest existing = existing(RequestStatus.OPEN);
+
+        assertThat(service.cancel(existing.getId(), new CancelRequestDTO("Cuenta suspendida"), ADMIN).getStatus())
+                .isEqualTo(RequestStatus.CANCELLED);
+    }
     @Test
     void unknownRequestReturnsNotFound() {
         Long id = 999L;
         when(repository.findById(id)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.findById(id))
+        assertThatThrownBy(() -> service.findById(id, CLIENT))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
@@ -257,7 +377,6 @@ class RequestServiceImplTest {
 
     private CreateRequestDTO urgentDto() {
         CreateRequestDTO dto = new CreateRequestDTO();
-        dto.setClientId(55L);
         dto.setServiceTypeId(serviceTypeId);
         dto.setMode(RequestMode.URGENT);
         dto.setZoneId(3L);
@@ -270,7 +389,6 @@ class RequestServiceImplTest {
 
     private CreateRequestDTO scheduledDto() {
         CreateRequestDTO dto = new CreateRequestDTO();
-        dto.setClientId(55L);
         dto.setServiceTypeId(serviceTypeId);
         dto.setMode(RequestMode.SCHEDULED);
         dto.setZoneId(3L);

@@ -38,6 +38,29 @@ docker compose up -d request-db
 
 `verify` ejecuta las pruebas unitarias (`*Test`), las de integración (`*IT`, con un MySQL 8 real en Testcontainers, requieren Docker) y el control de cobertura de JaCoCo: mínimo 80 % de líneas en todo el servicio y 90 % en `services`, `policies` y `models`. Si no se alcanza, el build falla. El informe queda en `target/site/jacoco/index.html`.
 
+## Seguridad
+
+Todos los endpoints (salvo Swagger y `/actuator/health`) exigen un JWT de Firebase Authentication en la cabecera `Authorization: Bearer <token>` (RNF-15). El servicio solo valida el token (firma, emisor, audiencia y vencimiento); el permiso de cada operación se verifica en la capa `services` según el rol y la relación con la solicitud (RNF-16).
+
+| Variable | Para qué sirve | Valor por defecto |
+|---|---|---|
+| `FIREBASE_PROJECT_ID` | Proyecto de Firebase: define el emisor `https://securetoken.google.com/<id>` y la audiencia | `fixgo-dev` |
+| `JWT_ISSUER_URI` | Otro emisor de tokens (opcional) | emisor de Firebase |
+| `JWT_USER_ID_CLAIM` | Claim con el id numérico de la cuenta | `userId` |
+| `JWT_ROLE_CLAIM` | Claim con el rol: `CLIENT`, `PROVIDER`, `ADMIN` o `SERVICE` | `role` |
+
+> Los nombres de los claims son **provisionales**: cómo el sujeto de Firebase se asocia al id numérico de la cuenta está pendiente (Q-004). El rol `SERVICE` (llamadas internas entre servicios) también es provisional (Q-016).
+
+| Operación | Quién puede |
+|---|---|
+| `POST` crear, `PUT` actualizar | Solo el `CLIENT` dueño (el cliente sale del token, no del cuerpo) |
+| `GET /{id}` | Dueño, profesional asignado o `ADMIN`; si no, 403 |
+| `GET` lista | Cada quien ve solo lo propio (cliente: las suyas; profesional: las asignadas); `ADMIN` ve todo y puede filtrar por cliente |
+| `PATCH /{id}/cancel` | Dueño, profesional asignado o `ADMIN` |
+| `/actuator/**` (salvo `health`) | Solo `ADMIN` |
+
+Sin token o con token inválido responde `401 UNAUTHORIZED`; con token válido pero sin permiso, `403 FORBIDDEN`, ambos con el wrapper `ApiResponse`.
+
 ## Endpoints de solicitudes
 
 | Método | Ruta | Requisito | Respuesta OK |
@@ -48,11 +71,10 @@ docker compose up -d request-db
 | `PUT` | `/api/v1/requests/{id}` | RF3.3 (solo `PENDING` u `OPEN`) | 200 |
 | `PATCH` | `/api/v1/requests/{id}/cancel` | RF3.4, RN-08 (borrado lógico) | 200 |
 
-Ejemplo para probar en Swagger (`POST`, solicitud urgente):
+Ejemplo para probar en Swagger (`POST`, solicitud urgente; el cliente se toma del token):
 
 ```json
 {
-  "clientId": 1,
   "serviceTypeId": 7,
   "mode": "URGENT",
   "description": "El carro no enciende",
@@ -91,8 +113,9 @@ co.fixgo.request
 ├── clients        clientes REST hacia otros servicios        → CatalogRestClient
 ├── repositories   Spring Data JPA                            → ServiceRequestRepository
 ├── models         entidades propias                          → ServiceRequest, Quote
+├── security       identidad del JWT y errores 401/403        → CurrentActor, JwtCurrentActorProvider
 ├── exceptions     errores de negocio y manejador global      → GlobalExceptionHandler, BusinessRuleException
-└── config         configuración transversal                  → OpenApiConfig
+└── config         configuración transversal                  → OpenApiConfig, SecurityConfig, ClockConfig
 ```
 
 ## Formato de respuesta (wrapper `ApiResponse<T>`)
@@ -129,7 +152,8 @@ Error de validación (`400 Bad Request`):
 |---|---|---|
 | 400 | `VALIDATION_ERROR` | Uno o más campos no cumplen las validaciones del DTO (cada campo en `details`) |
 | 400 | `MALFORMED_REQUEST` | JSON mal formado, tipo de dato incorrecto o parámetro ausente |
-| 401 / 403 | — | Sin token válido o sin permiso (pendiente: configuración de seguridad) |
+| 401 | `UNAUTHORIZED` | Sin token o con token inválido o vencido |
+| 403 | `FORBIDDEN` | Token válido, pero el rol o la propiedad del recurso no permiten la operación |
 | 404 | `RESOURCE_NOT_FOUND` / `ROUTE_NOT_FOUND` | El recurso o la ruta no existen |
 | 405 | `METHOD_NOT_ALLOWED` | Método HTTP no permitido en la ruta |
 | 409 | `BUSINESS_RULE_VIOLATION` o el código de la regla (ej. `QUOTE_ALREADY_ACCEPTED`) | Se incumple una regla de negocio o una transición de estado |

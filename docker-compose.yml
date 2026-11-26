@@ -28,6 +28,9 @@ services:
       DB_NAME: ${DB_NAME}
       DB_USERNAME: ${DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-fixgo-dev}
+      JWT_USER_ID_CLAIM: ${JWT_USER_ID_CLAIM:-userId}
+      JWT_ROLE_CLAIM: ${JWT_ROLE_CLAIM:-role}
     ports:
       - "${SERVER_PORT:-8084}:${SERVER_PORT:-8084}"
     depends_on:

@@ -11,6 +11,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -62,6 +64,24 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleMalformedRequest(Exception ex) {
         return build(HttpStatus.BAD_REQUEST, "MALFORMED_REQUEST",
                 "La solicitud está mal formada o tiene un tipo de dato incorrecto.", null);
+    }
+
+    /** 401: no hay un token válido (también si falla al leer el actor dentro de un servicio). */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnauthorized(AuthenticationException ex) {
+        return build(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "Necesitas iniciar sesión para continuar.", null);
+    }
+
+    /** 403: la cuenta no tiene permiso sobre el recurso o la operación (rol o propiedad). */
+    @ExceptionHandler(ForbiddenOperationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleForbidden(ForbiddenOperationException ex) {
+        return build(HttpStatus.FORBIDDEN, "FORBIDDEN", ex.getMessage(), null);
+    }
+
+    /** 403: Spring Security negó el acceso (por ejemplo, una regla de método). */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        return build(HttpStatus.FORBIDDEN, "FORBIDDEN", "No tienes permiso para realizar esta acción.", null);
     }
 
     /** 404: el recurso de negocio no existe. */

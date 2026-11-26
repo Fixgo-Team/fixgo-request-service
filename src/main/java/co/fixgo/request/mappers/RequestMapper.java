@@ -13,10 +13,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class RequestMapper {
 
-    /** Crea la entidad a partir del JSON de entrada. El estado inicial lo decide el servicio. */
+    /** Crea la entidad a partir del JSON de entrada. El cliente y el estado inicial los decide el servicio. */
     public ServiceRequest toEntity(CreateRequestDTO dto) {
         ServiceRequest request = new ServiceRequest();
-        request.setClientId(dto.getClientId());
         request.setServiceTypeId(dto.getServiceTypeId());
         request.setZoneId(dto.getZoneId());
         request.setMode(dto.getMode());

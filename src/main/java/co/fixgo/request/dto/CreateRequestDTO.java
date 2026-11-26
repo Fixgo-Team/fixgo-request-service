@@ -12,12 +12,9 @@ import java.math.BigDecimal;
 /**
  * Datos para crear una solicitud urgente (RF3.1) o programada (RF3.2).
  * Las reglas que dependen del modo (ubicación o dirección obligatoria) se validan en el servicio.
+ * El cliente no viaja en el JSON: sale del JWT (A01 de OWASP).
  */
 public class CreateRequestDTO {
-
-    // Temporal: con la seguridad (fase 2) se toma del token y deja de venir en el JSON
-    @NotNull(message = "El cliente es obligatorio.")
-    private Long clientId;
 
     @NotNull(message = "El subservicio es obligatorio.")
     private Long serviceTypeId;
@@ -55,14 +52,6 @@ public class CreateRequestDTO {
     private String vehicleType;
 
     public CreateRequestDTO() {
-    }
-
-    public Long getClientId() {
-        return clientId;
-    }
-
-    public void setClientId(Long clientId) {
-        this.clientId = clientId;
     }
 
     public Long getServiceTypeId() {

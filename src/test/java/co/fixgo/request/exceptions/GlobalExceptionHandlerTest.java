@@ -17,6 +17,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -87,6 +89,25 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void returns401WhenThereIsNoValidAuthentication() throws Exception {
+        mockMvc.perform(get("/test/unauthorized"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void returns403WhenTheAccountHasNoPermission() throws Exception {
+        mockMvc.perform(get("/test/forbidden"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.error.message").value("La solicitud no te pertenece."));
+        mockMvc.perform(get("/test/access-denied"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error.code").value("FORBIDDEN"));
+    }
+
+    @Test
     void returns409WhenTheDatabaseRejectsTheOperation() throws Exception {
         mockMvc.perform(get("/test/integrity"))
                 .andExpect(status().isConflict())
@@ -143,6 +164,21 @@ class GlobalExceptionHandlerTest {
         @GetMapping("/test/conflict")
         ResponseEntity<ApiResponse<Void>> conflict() {
             throw new BusinessRuleException("QUOTE_ALREADY_ACCEPTED", "La solicitud ya tiene una cotización aceptada.");
+        }
+
+        @GetMapping("/test/unauthorized")
+        ResponseEntity<ApiResponse<Void>> unauthorized() {
+            throw new BadCredentialsException("sin token");
+        }
+
+        @GetMapping("/test/forbidden")
+        ResponseEntity<ApiResponse<Void>> forbidden() {
+            throw new ForbiddenOperationException("La solicitud no te pertenece.");
+        }
+
+        @GetMapping("/test/access-denied")
+        ResponseEntity<ApiResponse<Void>> accessDenied() {
+            throw new AccessDeniedException("denegado");
         }
 
         @GetMapping("/test/integrity")

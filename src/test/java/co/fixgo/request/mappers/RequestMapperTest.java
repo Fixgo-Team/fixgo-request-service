@@ -19,7 +19,6 @@ class RequestMapperTest {
     @Test
     void toEntityCleansTextAndUppercasesThePlate() {
         CreateRequestDTO dto = new CreateRequestDTO();
-        dto.setClientId(1L);
         dto.setServiceTypeId(2L);
         dto.setZoneId(3L);
         dto.setMode(RequestMode.URGENT);
